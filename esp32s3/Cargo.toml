@@ -8,7 +8,7 @@ rust-version = "1.77"
 
 [[bin]]
 name = "esp32s3"
-harness = false # do not use the built-in cargo test harness -> resolve rust-analyzer errors
+harness = false  # do not use the built-in cargo test harness -> resolve rust-analyzer errors
 
 [features]
 default = []
@@ -17,11 +17,17 @@ experimental = ["esp-idf-svc/experimental"]
 
 [dependencies]
 log = "0.4"
-esp-idf-svc = { version = "0.51", features = ["std", "experimental", "alloc", "default"] }
+esp-idf-svc = { version = "0.51", features = [
+  "std",
+  "experimental",
+  "alloc",
+  "default",
+] }
 domination_web = { path = "../domination_web" }
 domination_uart = { path = "../domination_uart" }
-domination_game = { path = "../domination_game" }
 anyhow = "1.0.100"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 
 # --- Optional Embassy Integration ---
 # esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }

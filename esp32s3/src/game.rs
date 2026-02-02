@@ -1,6 +1,8 @@
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, Serialize)]
 pub enum Team {
     Red,
     Blue,
@@ -32,6 +34,19 @@ impl GameState {
             team_blue_time: Duration::ZERO,
             time_to_win,
         }
+    }
+
+    pub fn match_progress(&mut self) -> Option<MatchProgress> {
+        if !self.active() {
+            return None;
+        }
+
+        self.tick();
+
+        Some(MatchProgress {
+            scores: self.scores(),
+            current_team: self.current_team,
+        })
     }
 
     pub fn active(&self) -> bool {
@@ -109,7 +124,10 @@ impl GameState {
 
     /// Expose current scores (for UI / WS)
     pub fn scores(&self) -> Scores {
-        Scores { red: self.team_red_time, blue: self.team_blue_time }
+        Scores {
+            red: self.team_red_time,
+            blue: self.team_blue_time,
+        }
     }
 
     /// Who currently owns the point
@@ -118,7 +136,14 @@ impl GameState {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
 pub struct Scores {
     red: Duration,
-    blue: Duration
+    blue: Duration,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MatchProgress {
+    scores: Scores,
+    current_team: Option<Team>,
 }
