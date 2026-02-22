@@ -1,5 +1,5 @@
-use std::process::Command;
 use std::path::Path;
+use std::process::Command;
 
 fn run(cmd: &mut Command, name: &str) {
     let status = cmd.status().expect("failed to spawn process");
@@ -18,9 +18,7 @@ fn main() {
 
     // npm install
     run(
-        Command::new("npm")
-            .arg("install")
-            .current_dir(frontend_dir),
+        Command::new("npm").arg("install").current_dir(frontend_dir),
         "npm install",
     );
 
@@ -33,4 +31,3 @@ fn main() {
         "npm run build",
     );
 }
-

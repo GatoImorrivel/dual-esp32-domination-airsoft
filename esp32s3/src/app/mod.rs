@@ -1,16 +1,23 @@
-use std::{
-    sync::{mpsc, OnceLock},
-    time::Duration,
-};
+pub mod client;
 
 use esp_idf_svc::hal::delay::FreeRtos;
+use serde::Serialize;
+
+use std::sync::mpsc;
 
 use crate::{
+    app::client::{AppClient, APP_CLIENT},
     game::{GameState, MatchProgress},
-    wifi::Wifi,
+    hardware::wifi::{Wifi, WifiConfig},
 };
 
 type Reply<T> = mpsc::Sender<T>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AppState {
+    Setup,
+    Running,
+}
 
 #[derive(Debug)]
 enum AppEvent {
@@ -23,9 +30,17 @@ enum AppEvent {
     StopGame {
         reply: Reply<anyhow::Result<()>>,
     },
+    Configure {
+        wifi_config: WifiConfig,
+        reply: Reply<anyhow::Result<()>>,
+    },
+    GetAppState {
+        reply: Reply<AppState>,
+    },
 }
 
 pub struct App {
+    state: AppState,
     game: GameState,
     sender: mpsc::Sender<AppEvent>,
     receiver: mpsc::Receiver<AppEvent>,
@@ -36,6 +51,7 @@ impl App {
     pub fn new(wifi: Wifi) -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
+            state: AppState::Setup,
             sender,
             receiver,
             game: GameState::default(),
@@ -43,9 +59,20 @@ impl App {
         }
     }
 
-    pub fn run<F: Fn(&mut Self) -> anyhow::Result<()> + Send + 'static>(mut self, coroutine: F) {
+    pub fn mut_game(&mut self) -> &mut GameState {
+        &mut self.game
+    }
+
+    pub fn run<F: FnMut(&mut Self) -> anyhow::Result<()> + Send + 'static>(
+        mut self,
+        mut coroutine: F,
+    ) {
         self.init_client();
         loop {
+            if let Err(err) = coroutine(&mut self) {
+                log::error!("Error in coroutine: {}", err);
+            }
+
             if self.game.active() {
                 self.game.tick();
             }
@@ -56,12 +83,7 @@ impl App {
                 }
             }
 
-            if let Err(err) = coroutine(&mut self) {
-                log::error!("Error in app coroutine {}", err);
-                panic!();
-            }
-
-            FreeRtos::delay_ms(2000);
+            FreeRtos::delay_ms(20);
         }
     }
 
@@ -85,6 +107,13 @@ impl App {
                 reply.send(Ok(()))?;
             }
             AppEvent::StartGame { reply } => {
+                if self.state == AppState::Setup {
+                    reply.send(Err(anyhow::anyhow!(
+                        "Aplicação está em modo de configuração"
+                    )))?;
+                    return Ok(());
+                }
+
                 if self.game.active() {
                     reply.send(Err(anyhow::anyhow!("Jogo já está iniciado")))?;
                     return Ok(());
@@ -92,6 +121,16 @@ impl App {
 
                 self.game.start();
                 reply.send(Ok(()))?;
+            }
+            AppEvent::Configure { wifi_config, reply } => {
+                esp_idf_svc::hal::task::block_on(async {
+                    self.wifi.configure(&wifi_config).await.unwrap();
+                });
+                reply.send(Ok(()))?;
+                self.state = AppState::Running;
+            }
+            AppEvent::GetAppState { reply } => {
+                reply.send(self.state)?;
             }
         }
         Ok(())
@@ -103,45 +142,5 @@ impl App {
         };
 
         APP_CLIENT.set(client).unwrap();
-    }
-}
-
-static APP_CLIENT: OnceLock<AppClient> = OnceLock::new();
-
-#[derive(Debug, Clone)]
-pub struct AppClient {
-    tx: mpsc::Sender<AppEvent>,
-}
-
-impl AppClient {
-    pub fn get_match_progress(&self) -> anyhow::Result<MatchProgress> {
-        let (reply, rx) = mpsc::channel();
-        self.tx.send(AppEvent::GetMatchProgress { reply })?;
-        let response = rx.recv_timeout(Duration::from_secs(5))??;
-
-        Ok(response)
-    }
-
-    pub fn start_game(&self) -> anyhow::Result<()> {
-        let (reply, rx) = mpsc::channel();
-        self.tx.send(AppEvent::StartGame { reply })?;
-        let response = rx.recv_timeout(Duration::from_secs(5))??;
-
-        Ok(response)
-    }
-
-    pub fn stop_game(&self) -> anyhow::Result<()> {
-        let (reply, rx) = mpsc::channel();
-        self.tx.send(AppEvent::StopGame { reply })?;
-        let response = rx.recv_timeout(Duration::from_secs(5))??;
-
-        Ok(response)
-    }
-
-    pub fn get() -> AppClient {
-        APP_CLIENT
-            .get()
-            .expect("App client wasnt initialized yet")
-            .clone()
     }
 }

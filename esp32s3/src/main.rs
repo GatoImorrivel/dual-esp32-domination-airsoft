@@ -1,5 +1,13 @@
 use std::time::Duration;
 
+use crate::{
+    app::App,
+    hardware::{input::InputButton, wifi::Wifi},
+    http::{
+        routes::routes,
+        server::{load_web, HttpServer},
+    },
+};
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::prelude::Peripherals,
@@ -12,18 +20,11 @@ use esp_idf_svc::{
     timer::EspTaskTimerService,
     wifi::{AsyncWifi, EspWifi},
 };
-use serde::{Deserialize, Serialize};
-
-use crate::{
-    app::{App, AppClient},
-    server::{load_web, HttpServer, Json, Response},
-    wifi::Wifi,
-};
 
 mod app;
 mod game;
-mod server;
-mod wifi;
+mod hardware;
+mod http;
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -42,8 +43,6 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let mut wifi = Wifi::init(async_wifi);
-    esp_idf_svc::hal::task::block_on(async {});
-
     let mut server = HttpServer::new();
     load_web(&mut server);
     routes(&mut server);
@@ -55,11 +54,29 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
     core::mem::forget(mdns);
 
+    let red_btn = InputButton::new(peripherals.pins.gpio8, 50)?;
+    let blue_btn = InputButton::new(peripherals.pins.gpio18, 50)?;
+
     std::thread::Builder::new()
         .stack_size(16 * 1024)
         .spawn(move || {
+            esp_idf_svc::hal::task::block_on(async {
+                wifi.ap_mode().await.unwrap();
+            });
             let app = App::new(wifi);
-            app.run(|_app| Ok(()));
+            app.run(move |app| {
+                if red_btn.is_pressed() {
+                    log::info!("Red team pressed");
+                    app.mut_game().button_press(game::Team::Red);
+                }
+
+                if blue_btn.is_pressed() {
+                    log::info!("Blue team pressed");
+                    app.mut_game().button_press(game::Team::Blue);
+                }
+
+                Ok(())
+            });
         })
         .unwrap();
 
@@ -67,29 +84,6 @@ fn main() -> anyhow::Result<()> {
         heap_report();
         std::thread::sleep(Duration::from_secs(10));
     }
-}
-
-fn routes(server: &mut HttpServer) {
-    #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-    struct EmptyRequest {}
-
-    server.get("/game/progress", || {
-        let client = AppClient::get();
-        let progress = client.get_match_progress()?;
-        Ok(Json::new(&progress)?.into())
-    });
-
-    server.post("/game/start", |_: EmptyRequest| {
-        let client = AppClient::get();
-        client.start_game()?;
-        Ok(Response::ok())
-    });
-
-    server.post("/game/stop", |_: EmptyRequest| {
-        let client = AppClient::get();
-        client.stop_game()?;
-        Ok(Response::ok())
-    });
 }
 
 pub fn heap_report() {

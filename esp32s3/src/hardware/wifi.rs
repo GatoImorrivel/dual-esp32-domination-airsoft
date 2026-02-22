@@ -2,9 +2,17 @@ use std::fmt::Debug;
 
 use anyhow::Ok;
 use esp_idf_svc::wifi::{AccessPointConfiguration, AsyncWifi, ClientConfiguration, EspWifi};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WifiConfig {
+    APMode,
+    ClientMode { ssid: String, password: String },
+}
 
 pub struct Wifi {
     wifi: AsyncWifi<EspWifi<'static>>,
+    config: Option<WifiConfig>,
 }
 
 impl Debug for Wifi {
@@ -15,10 +23,28 @@ impl Debug for Wifi {
 
 impl Wifi {
     pub fn init(wifi: AsyncWifi<EspWifi<'static>>) -> Self {
-        Self { wifi }
+        Self { wifi, config: None }
+    }
+
+    pub async fn configure(&mut self, config: &WifiConfig) -> anyhow::Result<()> {
+        match &config {
+            WifiConfig::APMode => self.ap_mode().await?,
+            WifiConfig::ClientMode { ssid, password } => self.client_mode(ssid, password).await?,
+        }
+        Ok(())
     }
 
     pub async fn client_mode<S: AsRef<str>>(&mut self, ssid: S, password: S) -> anyhow::Result<()> {
+        match &self.config {
+            Some(mode) => match mode {
+                WifiConfig::ClientMode { .. } => {
+                    return Ok(());
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+
         self.wifi.stop().await?;
 
         let config = esp_idf_svc::wifi::Configuration::Client(ClientConfiguration {
@@ -35,10 +61,21 @@ impl Wifi {
 
         self.wifi.wait_netif_up().await?;
 
+        self.config = Some(WifiConfig::ClientMode {
+            ssid: ssid.as_ref().to_owned(),
+            password: password.as_ref().to_owned(),
+        });
+
         Ok(())
     }
 
     pub async fn ap_mode(&mut self) -> anyhow::Result<()> {
+        if let Some(mode) = &self.config {
+            if *mode == WifiConfig::APMode {
+                return Ok(());
+            }
+        }
+
         self.wifi.stop().await?;
 
         let config = esp_idf_svc::wifi::Configuration::AccessPoint(AccessPointConfiguration {
@@ -51,6 +88,8 @@ impl Wifi {
         self.wifi.set_configuration(&config)?;
 
         self.wifi.start().await?;
+
+        self.config = Some(WifiConfig::APMode);
 
         Ok(())
     }

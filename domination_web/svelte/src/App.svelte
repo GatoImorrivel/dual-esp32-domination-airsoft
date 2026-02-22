@@ -1,27 +1,21 @@
-<script>
-  import svelteLogo from './assets/svelte.svg'
-  import viteLogo from '/vite.svg'
-  import Counter from './lib/Counter.svelte'
+<script lang="ts">
+  import { getComponent, initRouter } from "./router";
+  import AdminPanel from "./routes/AdminPanel.svelte";
+  import Config from "./routes/Config.svelte";
+  import Leaderboard from "./routes/Leaderboard.svelte";
+  import PageNotFound from "./routes/PageNotFound.svelte";
+
+  initRouter({
+    "/": () => Config,
+    "/leaderboard": () => Leaderboard,
+    "/admin": () => AdminPanel,
+  });
+
+  $: Component = getComponent();
 </script>
 
-<h1>
-  Eai sogro
-</h1>
-
-<style>
-  .logo {
-    height: 6em;
-    padding: 1.5em;
-    will-change: filter;
-    transition: filter 300ms;
-  }
-  .logo:hover {
-    filter: drop-shadow(0 0 2em #646cffaa);
-  }
-  .logo.svelte:hover {
-    filter: drop-shadow(0 0 2em #ff3e00aa);
-  }
-  .read-the-docs {
-    color: #888;
-  }
-</style>
+{#if Component}
+  <svelte:component this={Component} />
+{:else}
+  <svelte:component this={PageNotFound} />
+{/if}
