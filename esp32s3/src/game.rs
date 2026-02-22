@@ -75,6 +75,7 @@ impl GameState {
     /// Handle a button press
     pub fn button_press(&mut self, team: Team) {
         if !self.active {
+            log::info!("{team:#?} pressed the button, ignoring due to game being inactive");
             return;
         }
 

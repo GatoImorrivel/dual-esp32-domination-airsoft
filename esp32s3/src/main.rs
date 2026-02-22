@@ -4,8 +4,8 @@ use crate::{
     app::App,
     hardware::{input::InputButton, wifi::Wifi},
     http::{
-        routes::routes,
-        server::{load_web, HttpServer},
+        routes::{load_web, routes},
+        server::HttpServer,
     },
 };
 use esp_idf_svc::{
@@ -66,12 +66,10 @@ fn main() -> anyhow::Result<()> {
             let app = App::new(wifi);
             app.run(move |app| {
                 if red_btn.is_pressed() {
-                    log::info!("Red team pressed");
                     app.mut_game().button_press(game::Team::Red);
                 }
 
                 if blue_btn.is_pressed() {
-                    log::info!("Blue team pressed");
                     app.mut_game().button_press(game::Team::Blue);
                 }
 
