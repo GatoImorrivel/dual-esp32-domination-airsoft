@@ -2,7 +2,7 @@ use std::{sync::mpsc, sync::OnceLock, time::Duration};
 
 use crate::{
     app::{AppEvent, AppState},
-    game::MatchProgress,
+    game::{GameConfig, MatchProgress},
     hardware::wifi::WifiConfig,
 };
 
@@ -38,10 +38,35 @@ impl AppClient {
         Ok(response)
     }
 
+    pub fn get_game_config(&self) -> anyhow::Result<GameConfig> {
+        let (reply, rx) = mpsc::channel();
+        self.tx.send(AppEvent::GetGameConfig { reply })?;
+        let response = rx.recv_timeout(Duration::from_secs(5))??;
+
+        Ok(response)
+    }
+
+    pub fn update_game_config(&self, new_config: GameConfig) -> anyhow::Result<()> {
+        let (reply, rx) = mpsc::channel();
+        self.tx
+            .send(AppEvent::UpdateGameConfig { new_config, reply })?;
+        let response = rx.recv_timeout(Duration::from_secs(5))??;
+
+        Ok(response)
+    }
+
     pub fn setup_wifi(&self, wifi_config: WifiConfig) -> anyhow::Result<()> {
         let (reply, rx) = mpsc::channel();
-        self.tx.send(AppEvent::Configure { wifi_config, reply })?;
+        self.tx.send(AppEvent::AppConfigure { wifi_config, reply })?;
         let response = rx.recv_timeout(Duration::from_secs(5))??;
+
+        Ok(response)
+    }
+
+    pub fn get_wifi_config(&self) -> anyhow::Result<Option<WifiConfig>> {
+        let (reply, rx) = mpsc::channel();
+        self.tx.send(AppEvent::GetWifiConfig { reply })?;
+        let response = rx.recv_timeout(Duration::from_secs(5))?;
 
         Ok(response)
     }

@@ -1,7 +1,3 @@
-<script lang="ts">
-  // 404 pages usually stay dumb on purpose
-</script>
-
 <div class="wrapper">
   <div class="card">
     <div class="code">404</div>

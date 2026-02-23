@@ -3,7 +3,7 @@ use esp_idf_svc::{
     io::{Read, Write},
 };
 
-use crate::http::Response;
+use crate::http::{ContentType, Response};
 
 const MAX_PAYLOAD_LEN: usize = 128;
 
@@ -13,10 +13,33 @@ pub struct HttpServer {
 
 impl HttpServer {
     pub fn new() -> Self {
-        let server = EspHttpServer::new(&esp_idf_svc::http::server::Configuration {
+        let mut server = EspHttpServer::new(&esp_idf_svc::http::server::Configuration {
+            stack_size: 12288,
             ..Default::default()
         })
         .unwrap();
+
+        #[cfg(debug_assertions)]
+        {
+            server
+                .fn_handler("/*", esp_idf_svc::http::Method::Options, |request| {
+                    request
+                        .into_response(
+                            204,
+                            None,
+                            &[
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Origin", "*"),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Headers", "Content-Type"),
+                            ],
+                        )?
+                        .write_all(&[])
+                })
+                .unwrap();
+        }
 
         Self {
             esp_http_server: server,
@@ -36,7 +59,19 @@ impl HttpServer {
                     if let Err(err) = response {
                         log::error!("Error handling {}: {}", request.uri(), err);
                         return request
-                            .into_status_response(500)?
+                            .into_response(
+                                500,
+                                None,
+                                &[
+                                    content_type(ContentType::Text.into_media_type().0),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Origin", "*"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Headers", "Content-Type"),
+                                ],
+                            )?
                             .write_all(err.to_string().as_bytes());
                     }
                     let response = response.unwrap();
@@ -45,7 +80,15 @@ impl HttpServer {
                         .into_response(
                             response.status_code,
                             None,
-                            &[content_type(&response.content_type.into_media_type().0)],
+                            &[
+                                content_type(response.content_type.into_media_type().0),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Origin", "*"),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Headers", "Content-Type"),
+                            ],
                         )?
                         .write_all(body)
                         .map(|_| ())
@@ -77,7 +120,19 @@ impl HttpServer {
 
                     if let Err(err) = len {
                         return request
-                            .into_status_response(500)?
+                            .into_response(
+                                500,
+                                None,
+                                &[
+                                    content_type(ContentType::Text.into_media_type().0),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Origin", "*"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Headers", "Content-Type"),
+                                ],
+                            )?
                             .write_all(err.to_string().as_bytes());
                     }
 
@@ -85,7 +140,19 @@ impl HttpServer {
 
                     if len > MAX_PAYLOAD_LEN {
                         return request
-                            .into_status_response(413)?
+                            .into_response(
+                                413,
+                                None,
+                                &[
+                                    content_type(ContentType::Text.into_media_type().0),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Origin", "*"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Headers", "Content-Type"),
+                                ],
+                            )?
                             .write_all("Request too big".as_bytes());
                     }
 
@@ -94,7 +161,19 @@ impl HttpServer {
 
                     if let Err(err) = read_result {
                         return request
-                            .into_status_response(400)?
+                            .into_response(
+                                400,
+                                None,
+                                &[
+                                    content_type(ContentType::Text.into_media_type().0),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Origin", "*"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Headers", "Content-Type"),
+                                ],
+                            )?
                             .write_all(err.to_string().as_bytes());
                     }
 
@@ -102,7 +181,19 @@ impl HttpServer {
 
                     if let Err(err) = data {
                         return request
-                            .into_status_response(422)?
+                            .into_response(
+                                422,
+                                None,
+                                &[
+                                    content_type(ContentType::Text.into_media_type().0),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Origin", "*"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Headers", "Content-Type"),
+                                ],
+                            )?
                             .write_all(err.to_string().as_bytes());
                     }
 
@@ -110,7 +201,19 @@ impl HttpServer {
                     if let Err(err) = response {
                         log::error!("Error handling {}: {}", request.uri(), err);
                         return request
-                            .into_status_response(500)?
+                            .into_response(
+                                500,
+                                None,
+                                &[
+                                    content_type(ContentType::Text.into_media_type().0),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Origin", "*"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                    #[cfg(debug_assertions)]
+                                    ("Access-Control-Allow-Headers", "Content-Type"),
+                                ],
+                            )?
                             .write_all(err.to_string().as_bytes());
                     }
                     let response = response.unwrap();
@@ -118,7 +221,15 @@ impl HttpServer {
                         .into_response(
                             response.status_code,
                             None,
-                            &[content_type(&response.content_type.into_media_type().0)],
+                            &[
+                                content_type(response.content_type.into_media_type().0),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Origin", "*"),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                                #[cfg(debug_assertions)]
+                                ("Access-Control-Allow-Headers", "Content-Type"),
+                            ],
                         )?
                         .write_all(response.body())
                 },

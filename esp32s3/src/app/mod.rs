@@ -7,7 +7,7 @@ use std::sync::mpsc;
 
 use crate::{
     app::client::{AppClient, APP_CLIENT},
-    game::{GameState, MatchProgress},
+    game::{GameConfig, GameState, MatchProgress},
     hardware::wifi::{Wifi, WifiConfig},
 };
 
@@ -30,9 +30,19 @@ enum AppEvent {
     StopGame {
         reply: Reply<anyhow::Result<()>>,
     },
-    Configure {
+    UpdateGameConfig {
+        new_config: GameConfig,
+        reply: Reply<anyhow::Result<()>>,
+    },
+    GetGameConfig {
+        reply: Reply<anyhow::Result<GameConfig>>,
+    },
+    AppConfigure {
         wifi_config: WifiConfig,
         reply: Reply<anyhow::Result<()>>,
+    },
+    GetWifiConfig {
+        reply: Reply<Option<WifiConfig>>,
     },
     GetAppState {
         reply: Reply<AppState>,
@@ -90,11 +100,6 @@ impl App {
     fn handle_event(&mut self, event: &AppEvent) -> anyhow::Result<()> {
         match event {
             AppEvent::GetMatchProgress { reply } => {
-                if !self.game.active() {
-                    reply.send(Err(anyhow::anyhow!("Jogo ainda não iniciado")))?;
-                    return Ok(());
-                }
-
                 reply.send(Ok(self.game.match_progress().unwrap()))?;
             }
             AppEvent::StopGame { reply } => {
@@ -122,15 +127,27 @@ impl App {
                 self.game.start();
                 reply.send(Ok(()))?;
             }
-            AppEvent::Configure { wifi_config, reply } => {
+            AppEvent::GetGameConfig { reply } => {
+                let config = self.game.current_config();
+                reply.send(Ok(*config))?;
+            }
+            AppEvent::UpdateGameConfig { new_config, reply } => {
+                self.game.update_config(*new_config);
+                reply.send(Ok(()))?;
+            }
+            AppEvent::AppConfigure { wifi_config, reply } => {
                 esp_idf_svc::hal::task::block_on(async {
                     self.wifi.configure(&wifi_config).await.unwrap();
                 });
-                reply.send(Ok(()))?;
                 self.state = AppState::Running;
+                reply.send(Ok(()))?;
             }
             AppEvent::GetAppState { reply } => {
                 reply.send(self.state)?;
+            }
+            AppEvent::GetWifiConfig { reply } => {
+                let wifi_config = self.wifi.current_config();
+                reply.send(wifi_config.clone())?;
             }
         }
         Ok(())

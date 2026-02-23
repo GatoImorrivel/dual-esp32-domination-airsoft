@@ -1,8 +1,9 @@
 use domination_web::{web_files, Dir};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     app::client::AppClient,
+    game::GameConfig,
     hardware::wifi::WifiConfig,
     http::{server::HttpServer, ContentType, Json, Response, ResponseBody},
 };
@@ -29,15 +30,38 @@ pub fn routes(server: &mut HttpServer) {
         Ok(Response::ok())
     });
 
+    server.post("/game/config", |config: GameConfig| {
+        let client = AppClient::get();
+        client.update_game_config(config)?;
+        Ok(Response::ok())
+    });
+
+    server.get("/game/config", || {
+        let client = AppClient::get();
+        let config = client.get_game_config()?;
+        Ok(Json::new(&config)?.into())
+    });
+
     #[derive(Debug, Clone, Deserialize)]
     struct ConfigureRequest {
         wifi_config: WifiConfig,
     }
 
-    server.post("/app/configure", |request: ConfigureRequest| {
+    server.post("/app/config", |request: ConfigureRequest| {
         let client = AppClient::get();
         client.setup_wifi(request.wifi_config)?;
         Ok(Response::ok())
+    });
+
+    #[derive(Debug, Clone, Serialize)]
+    struct GetAppConfigRequest {
+        wifi_config: Option<WifiConfig>,
+    }
+
+    server.get("/app/config", || {
+        let client = AppClient::get();
+        let wifi_config = client.get_wifi_config()?;
+        Ok(Json::new(&GetAppConfigRequest { wifi_config })?.into())
     });
 
     server.get("/app/status", || {

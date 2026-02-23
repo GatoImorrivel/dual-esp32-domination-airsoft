@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum Team {
@@ -15,37 +15,41 @@ pub struct GameState {
     last_tick: Option<Instant>,
     team_red_time: Duration,
     team_blue_time: Duration,
-    time_to_win: Duration,
+    config: GameConfig,
 }
 
 impl Default for GameState {
     fn default() -> Self {
-        GameState::new(Duration::from_secs(10))
+        GameState::new(GameConfig::default())
     }
 }
 
 impl GameState {
-    pub fn new(time_to_win: Duration) -> Self {
+    pub fn new(config: GameConfig) -> Self {
         Self {
             active: false,
             current_team: None,
             last_tick: None,
             team_red_time: Duration::ZERO,
             team_blue_time: Duration::ZERO,
-            time_to_win,
+            config,
         }
     }
 
+    pub fn current_config(&self) -> &GameConfig {
+        &self.config
+    }
+
+    pub fn update_config(&mut self, new_config: GameConfig) {
+        self.config = new_config
+    }
+
     pub fn match_progress(&mut self) -> Option<MatchProgress> {
-        if !self.active() {
-            return None;
-        }
-
-        self.tick();
-
         Some(MatchProgress {
             scores: self.scores(),
-            current_team: self.current_team,
+            current_team: self.current_team(),
+            is_active: self.active(),
+            winner: self.winner(),
         })
     }
 
@@ -65,7 +69,6 @@ impl GameState {
 
     /// Stop the game (no more accumulation)
     pub fn stop(&mut self) {
-        self.tick();
         self.active = false;
         self.current_team = None;
         self.last_tick = None;
@@ -110,13 +113,18 @@ impl GameState {
         }
 
         self.last_tick = Some(now);
+
+        if let Some(winner) = self.winner() {
+            log::info!("{winner:#?} won");
+            self.stop();
+        }
     }
 
     /// Check if someone won
     pub fn winner(&self) -> Option<Team> {
-        if self.team_blue_time >= self.time_to_win {
+        if self.team_blue_time >= self.config.blue_time_to_win {
             Some(Team::Red)
-        } else if self.team_red_time >= self.time_to_win {
+        } else if self.team_red_time >= self.config.red_time_to_win {
             Some(Team::Blue)
         } else {
             None
@@ -146,5 +154,22 @@ pub struct Scores {
 #[derive(Debug, Clone, Serialize)]
 pub struct MatchProgress {
     scores: Scores,
+    is_active: bool,
     current_team: Option<Team>,
+    winner: Option<Team>,
+}
+
+#[derive(Debug, Clone, Serialize, Copy, Deserialize)]
+pub struct GameConfig {
+    pub red_time_to_win: Duration,
+    pub blue_time_to_win: Duration,
+}
+
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            blue_time_to_win: Duration::from_secs(10),
+            red_time_to_win: Duration::from_secs(10),
+        }
+    }
 }

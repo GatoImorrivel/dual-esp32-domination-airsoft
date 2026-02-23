@@ -26,6 +26,10 @@ impl Wifi {
         Self { wifi, config: None }
     }
 
+    pub fn current_config(&self) -> &Option<WifiConfig> {
+        &self.config
+    }
+
     pub async fn configure(&mut self, config: &WifiConfig) -> anyhow::Result<()> {
         match &config {
             WifiConfig::APMode => self.ap_mode().await?,
@@ -34,11 +38,17 @@ impl Wifi {
         Ok(())
     }
 
-    pub async fn client_mode<S: AsRef<str>>(&mut self, ssid: S, password: S) -> anyhow::Result<()> {
+    pub async fn client_mode<S: AsRef<str>>(
+        &mut self,
+        new_ssid: S,
+        password: S,
+    ) -> anyhow::Result<()> {
         match &self.config {
             Some(mode) => match mode {
-                WifiConfig::ClientMode { .. } => {
-                    return Ok(());
+                WifiConfig::ClientMode { ssid, password: _ } => {
+                    if ssid == new_ssid.as_ref() {
+                        return Ok(());
+                    }
                 }
                 _ => {}
             },
@@ -48,7 +58,7 @@ impl Wifi {
         self.wifi.stop().await?;
 
         let config = esp_idf_svc::wifi::Configuration::Client(ClientConfiguration {
-            ssid: ssid.as_ref().try_into().unwrap(),
+            ssid: new_ssid.as_ref().try_into().unwrap(),
             password: password.as_ref().try_into().unwrap(),
             ..Default::default()
         });
@@ -62,7 +72,7 @@ impl Wifi {
         self.wifi.wait_netif_up().await?;
 
         self.config = Some(WifiConfig::ClientMode {
-            ssid: ssid.as_ref().to_owned(),
+            ssid: new_ssid.as_ref().to_owned(),
             password: password.as_ref().to_owned(),
         });
 

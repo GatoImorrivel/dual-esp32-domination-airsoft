@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { post } from "../api/http";
+  import { post } from "../lib/http";
+  import { redirect } from "../lib/router";
 
   type WifiMode = "ap" | "sta";
 
@@ -7,7 +8,7 @@
   let ssid: string = "";
   let password: string = "";
 
-  function configure() {
+  async function configure() {
     if (!mode) return;
 
     const payload =
@@ -15,9 +16,22 @@
         ? { mode: "ap" as const }
         : { mode: "sta" as const, ssid, password };
 
-    console.log("Config payload:", payload);
-    // aqui você chamaria sua API / endpoint do ESP32
-    post("/app/configure", {});
+    await post("/app/config", {
+      wifi_config: (() => {
+        switch (payload.mode) {
+          case "ap":
+            return "APMode";
+          case "sta":
+            return {
+              ClientMode: {
+                ssid: payload.ssid,
+                password: payload.password,
+              },
+            };
+        }
+      })(),
+    });
+    redirect("/leaderboard");
   }
 </script>
 
@@ -26,7 +40,7 @@
 
   <div class="options">
     <button class:selected={mode === "ap"} on:click={() => (mode = "ap")}>
-      <span>ESP32 cria sua própria rede (AP Mode)</span>
+      <span>Continuar com a rede própria</span>
     </button>
 
     <button class:selected={mode === "sta"} on:click={() => (mode = "sta")}>
