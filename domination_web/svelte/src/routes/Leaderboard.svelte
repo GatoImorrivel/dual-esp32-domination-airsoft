@@ -48,6 +48,12 @@
 </script>
 
 <div class="container">
+  {#if progress?.winner}
+    <div class="winner-banner {progress.winner}">
+      🏆 {progress.winner === "Red" ? "VERMELHO VENCEU" : "AZUL VENCEU"}
+    </div>
+  {/if}
+
   <h1>Placar</h1>
 
   {#if progress}
@@ -56,12 +62,6 @@
         <div class="badge running">Partida em andamento</div>
       {:else}
         <div class="badge stopped">Partida parada</div>
-      {/if}
-
-      {#if progress.winner}
-        <div class="winner">
-          🏆 Vencedor: {progress.winner === "red" ? "Vermelho" : "Azul"}
-        </div>
       {/if}
     </div>
 
@@ -200,5 +200,37 @@
   .controls button:disabled {
     background: #6b7280;
     cursor: not-allowed;
+  }
+  .winner-banner {
+    width: 100%;
+    padding: 28px 16px;
+    font-size: 2.2rem;
+    font-weight: 800;
+    text-align: center;
+    letter-spacing: 1px;
+    border-radius: 18px;
+    margin-bottom: 28px;
+    animation: pop 0.4s ease;
+  }
+
+  .winner-banner.red {
+    background: linear-gradient(135deg, #ef4444, #b91c1c);
+    color: white;
+  }
+
+  .winner-banner.blue {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: white;
+  }
+
+  @keyframes pop {
+    from {
+      transform: scale(0.95);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
 </style>

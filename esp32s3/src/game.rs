@@ -115,7 +115,10 @@ impl GameState {
         self.last_tick = Some(now);
 
         if let Some(winner) = self.winner() {
-            log::info!("{winner:#?} won");
+            match (winner) {
+                Team::Red => log::info!("Red team won"),
+                Team::Blue => log::info!("Blue team won"),
+            }
             self.stop();
         }
     }
@@ -123,9 +126,9 @@ impl GameState {
     /// Check if someone won
     pub fn winner(&self) -> Option<Team> {
         if self.team_blue_time >= self.config.blue_time_to_win {
-            Some(Team::Red)
-        } else if self.team_red_time >= self.config.red_time_to_win {
             Some(Team::Blue)
+        } else if self.team_red_time >= self.config.red_time_to_win {
+            Some(Team::Red)
         } else {
             None
         }
