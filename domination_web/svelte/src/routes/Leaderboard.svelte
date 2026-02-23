@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onDestroy, onMount } from "svelte";
   import { get, post } from "../lib/http";
+  import { toast } from "../lib/toast";
 
   type Duration = { secs: number; nanos: number };
 
@@ -26,10 +28,36 @@
     await load();
   }
 
-  const interval = setInterval(async () => {
-    progress = await get("/game/progress");
-  }, 2000);
-  load();
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+  let polling = false;
+
+  async function fetchProgress() {
+    if (polling) return; // prevent overlap
+    polling = true;
+
+    try {
+      progress = await get("/game/progress");
+    } catch (e) {
+      toast.notify("Não foi possivel buscar progresso", "error");
+    } finally {
+      polling = false;
+    }
+  }
+
+  onMount(() => {
+    fetchProgress();
+
+    if (intervalId) clearInterval(intervalId);
+
+    intervalId = setInterval(fetchProgress, 2000);
+  });
+
+  onDestroy(() => {
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+  });
 
   $: redMs = durationToMs(progress?.scores?.red);
   $: blueMs = durationToMs(progress?.scores?.blue);

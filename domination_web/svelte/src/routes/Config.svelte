@@ -1,6 +1,7 @@
 <script lang="ts">
   import { post } from "../lib/http";
   import { redirect } from "../lib/router";
+  import { toast } from "../lib/toast";
 
   type WifiMode = "ap" | "sta";
 
@@ -16,22 +17,27 @@
         ? { mode: "ap" as const }
         : { mode: "sta" as const, ssid, password };
 
-    await post("/app/config", {
-      wifi_config: (() => {
-        switch (payload.mode) {
-          case "ap":
-            return "APMode";
-          case "sta":
-            return {
-              ClientMode: {
-                ssid: payload.ssid,
-                password: payload.password,
-              },
-            };
-        }
-      })(),
-    });
-    redirect("/leaderboard");
+    try {
+      await post("/app/config", {
+        wifi_config: (() => {
+          switch (payload.mode) {
+            case "ap":
+              return "APMode";
+            case "sta":
+              return {
+                ClientMode: {
+                  ssid: payload.ssid,
+                  password: payload.password,
+                },
+              };
+          }
+        })(),
+      });
+      redirect("/leaderboard");
+    } catch (error) {
+      console.error(error);
+      toast.notify("Falha ao conectar na rede", "error");
+    }
   }
 </script>
 
