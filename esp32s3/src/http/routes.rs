@@ -12,31 +12,31 @@ pub fn routes(server: &mut HttpServer) {
     #[derive(Debug, Clone, Copy, Deserialize)]
     struct EmptyRequest {}
 
-    server.get("/game/progress", || {
+    server.get("/game/progress", |_| {
         let client = AppClient::get();
         let progress = client.get_match_progress()?;
         Ok(Json::new(&progress)?.into())
     });
 
-    server.post("/game/start", |_: EmptyRequest| {
+    server.post("/game/start", |_: EmptyRequest, _| {
         let client = AppClient::get();
         client.start_game()?;
         Ok(Response::ok())
     });
 
-    server.post("/game/stop", |_: EmptyRequest| {
+    server.post("/game/stop", |_: EmptyRequest, _| {
         let client = AppClient::get();
         client.stop_game()?;
         Ok(Response::ok())
     });
 
-    server.post("/game/config", |config: GameConfig| {
+    server.post("/game/config", |config: GameConfig, _| {
         let client = AppClient::get();
         client.update_game_config(config)?;
         Ok(Response::ok())
     });
 
-    server.get("/game/config", || {
+    server.get("/game/config", |_| {
         let client = AppClient::get();
         let config = client.get_game_config()?;
         Ok(Json::new(&config)?.into())
@@ -47,7 +47,7 @@ pub fn routes(server: &mut HttpServer) {
         wifi_config: WifiConfig,
     }
 
-    server.post("/app/config", |request: ConfigureRequest| {
+    server.post("/app/config", |request: ConfigureRequest, _| {
         let client = AppClient::get();
         client.setup_wifi(request.wifi_config)?;
         Ok(Response::ok())
@@ -58,13 +58,13 @@ pub fn routes(server: &mut HttpServer) {
         wifi_config: Option<WifiConfig>,
     }
 
-    server.get("/app/config", || {
+    server.get("/app/config", |_| {
         let client = AppClient::get();
         let wifi_config = client.get_wifi_config()?;
         Ok(Json::new(&GetAppConfigRequest { wifi_config })?.into())
     });
 
-    server.get("/app/status", || {
+    server.get("/app/status", |_| {
         let client = AppClient::get();
         let app_status = client.get_app_state()?;
         Ok(Json::new(&app_status)?.into())

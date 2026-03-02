@@ -1,5 +1,8 @@
 use esp_idf_svc::{
-    http::{headers::content_type, server::EspHttpServer},
+    http::{
+        headers::content_type,
+        server::{EspHttpConnection, EspHttpServer, Request},
+    },
     io::{Read, Write},
 };
 
@@ -45,17 +48,17 @@ impl HttpServer {
             esp_http_server: server,
         }
     }
-    pub fn get<S: AsRef<str>, F: Fn() -> anyhow::Result<Response> + Send + Sync + 'static>(
-        &mut self,
-        url: S,
-        handler: F,
-    ) -> &mut Self {
+    pub fn get<S, F>(&mut self, url: S, handler: F) -> &mut Self
+    where
+        F: Fn(&Request<&mut EspHttpConnection>) -> anyhow::Result<Response> + Send + Sync + 'static,
+        S: AsRef<str>,
+    {
         self.esp_http_server
             .fn_handler(
                 url.as_ref(),
                 esp_idf_svc::http::Method::Get,
                 move |request| {
-                    let response = handler();
+                    let response = handler(&request);
                     if let Err(err) = response {
                         log::error!("Error handling {}: {}", request.uri(), err);
                         return request
@@ -99,15 +102,15 @@ impl HttpServer {
         self
     }
 
-    pub fn post<
+    pub fn post<S, B, F>(&mut self, url: S, handler: F) -> &mut Self
+    where
         S: AsRef<str>,
         B: for<'a> serde::Deserialize<'a> + 'static,
-        F: Fn(B) -> anyhow::Result<Response> + Send + Sync + 'static,
-    >(
-        &mut self,
-        url: S,
-        handler: F,
-    ) -> &mut Self {
+        F: Fn(B, &Request<&mut EspHttpConnection>) -> anyhow::Result<Response>
+            + Send
+            + Sync
+            + 'static,
+    {
         self.esp_http_server
             .fn_handler(
                 url.as_ref(),
@@ -197,7 +200,7 @@ impl HttpServer {
                             .write_all(err.to_string().as_bytes());
                     }
 
-                    let response = handler(data.unwrap());
+                    let response = handler(data.unwrap(), &request);
                     if let Err(err) = response {
                         log::error!("Error handling {}: {}", request.uri(), err);
                         return request
