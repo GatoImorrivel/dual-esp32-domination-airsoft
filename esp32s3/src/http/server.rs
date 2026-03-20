@@ -1,11 +1,16 @@
+use std::{ffi::CString, str::FromStr};
+
 use esp_idf_svc::{
     http::{headers::content_type, server::EspHttpServer},
     io::{Read, Write},
+    tls::X509,
 };
 
 use crate::http::{ContentType, Response};
 
 const MAX_PAYLOAD_LEN: usize = 128;
+static CERT: &'static str = concat!(include_str!("../../tls/cert.pem"), "\0");
+static KEY: &'static str = concat!(include_str!("../../tls/key.pem"), "\0");
 
 pub struct HttpServer {
     esp_http_server: EspHttpServer<'static>,
@@ -15,6 +20,8 @@ impl HttpServer {
     pub fn new() -> Self {
         let mut server = EspHttpServer::new(&esp_idf_svc::http::server::Configuration {
             stack_size: 12288,
+            server_certificate: Some(X509::pem_until_nul(CERT.as_bytes())),
+            private_key: Some(X509::pem_until_nul(KEY.as_bytes())),
             ..Default::default()
         })
         .unwrap();
