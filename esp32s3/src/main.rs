@@ -25,6 +25,7 @@ mod app;
 mod game;
 mod hardware;
 mod http;
+mod middleware;
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
