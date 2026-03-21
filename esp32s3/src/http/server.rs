@@ -50,15 +50,18 @@ impl HttpServer {
     }
     pub fn get<S, F>(&mut self, url: S, handler: F) -> &mut Self
     where
-        F: Fn(&Request<&mut EspHttpConnection>) -> anyhow::Result<Response> + Send + Sync + 'static,
+        F: Fn(&mut Request<&mut EspHttpConnection>) -> anyhow::Result<Response>
+            + Send
+            + Sync
+            + 'static,
         S: AsRef<str>,
     {
         self.esp_http_server
             .fn_handler(
                 url.as_ref(),
                 esp_idf_svc::http::Method::Get,
-                move |request| {
-                    let response = handler(&request);
+                move |mut request| {
+                    let response = handler(&mut request);
                     if let Err(err) = response {
                         log::error!("Error handling {}: {}", request.uri(), err);
                         return request
@@ -106,7 +109,7 @@ impl HttpServer {
     where
         S: AsRef<str>,
         B: for<'a> serde::Deserialize<'a> + 'static,
-        F: Fn(B, &Request<&mut EspHttpConnection>) -> anyhow::Result<Response>
+        F: Fn(B, &mut Request<&mut EspHttpConnection>) -> anyhow::Result<Response>
             + Send
             + Sync
             + 'static,
@@ -200,7 +203,7 @@ impl HttpServer {
                             .write_all(err.to_string().as_bytes());
                     }
 
-                    let response = handler(data.unwrap(), &request);
+                    let response = handler(data.unwrap(), &mut request);
                     if let Err(err) = response {
                         log::error!("Error handling {}: {}", request.uri(), err);
                         return request

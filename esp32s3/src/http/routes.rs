@@ -1,3 +1,4 @@
+use crate::middleware::auth::UserManager;
 use domination_web::{web_files, Dir};
 use serde::{Deserialize, Serialize};
 
@@ -6,6 +7,7 @@ use crate::{
     game::GameConfig,
     hardware::wifi::WifiConfig,
     http::{server::HttpServer, ContentType, Json, Response, ResponseBody},
+    middleware::auth::check_admin_auth_from_request,
 };
 
 pub fn routes(server: &mut HttpServer) {
@@ -18,19 +20,22 @@ pub fn routes(server: &mut HttpServer) {
         Ok(Json::new(&progress)?.into())
     });
 
-    server.post("/game/start", |_: EmptyRequest, _| {
+    server.post("/game/start", |_: EmptyRequest, mut req| {
+        check_admin_auth_from_request(&mut req)?;
         let client = AppClient::get();
         client.start_game()?;
         Ok(Response::ok())
     });
 
-    server.post("/game/stop", |_: EmptyRequest, _| {
+    server.post("/game/stop", |_: EmptyRequest, mut req| {
+        check_admin_auth_from_request(&mut req)?;
         let client = AppClient::get();
         client.stop_game()?;
         Ok(Response::ok())
     });
 
-    server.post("/game/config", |config: GameConfig, _| {
+    server.post("/game/config", |config: GameConfig, mut req| {
+        check_admin_auth_from_request(&mut req)?;
         let client = AppClient::get();
         client.update_game_config(config)?;
         Ok(Response::ok())
@@ -47,9 +52,9 @@ pub fn routes(server: &mut HttpServer) {
         wifi_config: WifiConfig,
     }
 
-    server.post("/app/config", |request: ConfigureRequest, _| {
+    server.post("/app/config", |body: ConfigureRequest, _| {
         let client = AppClient::get();
-        client.setup_wifi(request.wifi_config)?;
+        client.setup_wifi(body.wifi_config)?;
         Ok(Response::ok())
     });
 
@@ -69,6 +74,51 @@ pub fn routes(server: &mut HttpServer) {
         let app_status = client.get_app_state()?;
         Ok(Json::new(&app_status)?.into())
     });
+
+    #[derive(Debug, Clone, Deserialize)]
+    struct AuthChallengeRequest {
+        username: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct AuthChallengeResponse {
+        nonce: String,
+    }
+
+    server.post("/auth/challenge", |body: AuthChallengeRequest, _| {
+        let user_manager = UserManager::get();
+        let nonce = user_manager
+            .generate_nonce(body.username)
+            .ok_or_else(|| anyhow::anyhow!("Falha ao gerar nonce"))?;
+        Ok(Json::new(&AuthChallengeResponse { nonce })?.into())
+    });
+
+    #[derive(Debug, Clone, Deserialize)]
+    struct LoginRequest {
+        username: String,
+        password: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct LoginResponse {
+        token: String,
+    }
+
+    server.post("/auth/login", |body: LoginRequest, req| {
+        let ip = req
+            .connection()
+            .raw_connection()?
+            .source_ipv4()?
+            .to_string();
+        let mut user_manager = UserManager::get();
+        let token = user_manager
+            .generate_token(body.username, body.password, ip)
+            .ok_or_else(|| anyhow::anyhow!("Falha ao gerar token"))?;
+        Ok(Json::new(&LoginResponse {
+            token: token.into(),
+        })?
+        .into())
+    });
 }
 
 pub fn load_web(server: &mut HttpServer) {
@@ -76,7 +126,7 @@ pub fn load_web(server: &mut HttpServer) {
 
     if let Some(index) = web_build.get_file("index.html") {
         let contents = index.contents();
-        server.get("/", move || {
+        server.get("/", move |_| {
             Ok(Response {
                 status_code: 200,
                 content_type: ContentType::Html,
@@ -100,7 +150,7 @@ pub fn load_web(server: &mut HttpServer) {
 
             let contents = contents;
 
-            server.get(route, move || {
+            server.get(route, move |_| {
                 Ok(Response {
                     status_code: 200,
                     content_type: content_type,
