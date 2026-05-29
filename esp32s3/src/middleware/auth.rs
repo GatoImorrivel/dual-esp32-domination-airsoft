@@ -1,11 +1,21 @@
-use std::sync::OnceLock;
+use std::{mem, net::Ipv4Addr, sync::OnceLock};
 
 use anyhow::Context;
 use domination_auth::{AuthToken, NowFn, RngFn, UserManager};
-use esp_idf_svc::http::server::Request;
-use esp_idf_svc::sys::esp_random;
+use esp_idf_svc::{
+    handle::RawHandle,
+    http::server::Request,
+    sys::{
+        esp_random, httpd_req_to_sockfd, httpd_req_t, lwip_getpeername, sockaddr_in, sockaddr_in6,
+        AF_INET, AF_INET6,
+    },
+};
 
-use crate::http::RequestContext;
+use crate::{
+    hardware::network,
+    http::RequestContext,
+    middleware::client_ip::ipv4_from_lwip_sin6,
+};
 
 static USER_MANAGER: OnceLock<UserManager> = OnceLock::new();
 
@@ -41,25 +51,98 @@ pub fn user_manager() -> UserManager {
         .clone()
 }
 
-/// SoftAP mode often reports 0.0.0.0 from lwIP; use a stable sentinel for session binding.
-pub fn normalize_client_ip(ip: std::net::Ipv4Addr) -> String {
-    if ip.is_unspecified() || ip.is_loopback() {
-        "lan".to_string()
+fn usable_ipv4(ip: Ipv4Addr) -> Option<Ipv4Addr> {
+    if ip.is_unspecified() {
+        None
     } else {
-        ip.to_string()
+        Some(ip)
     }
 }
 
+/// ESP-IDF httpd sockets are often IPv6; read peer with `sockaddr_in6` then extract IPv4.
+unsafe fn peer_ipv4_from_httpd(req: *mut httpd_req_t) -> Option<Ipv4Addr> {
+    let sockfd = httpd_req_to_sockfd(req);
+    if sockfd == -1 {
+        return None;
+    }
+
+    let mut addr: sockaddr_in6 = mem::zeroed();
+    let mut addrlen = mem::size_of::<sockaddr_in6>() as u32;
+    if lwip_getpeername(
+        sockfd,
+        &mut addr as *mut _ as *mut _,
+        &mut addrlen as *mut _,
+    ) != 0
+    {
+        return None;
+    }
+
+    if addr.sin6_family == AF_INET as u8 {
+        let addr4: &sockaddr_in = &*(&addr as *const sockaddr_in6 as *const sockaddr_in);
+        return usable_ipv4(Ipv4Addr::from(u32::from_be(addr4.sin_addr.s_addr)));
+    }
+
+    if addr.sin6_family == AF_INET6 as u8 {
+        let bytes = addr.sin6_addr.un.u8_addr;
+        let slot3 = addr.sin6_addr.un.u32_addr[3];
+        return ipv4_from_lwip_sin6(bytes, slot3).and_then(usable_ipv4);
+    }
+
+    None
+}
+
+/// Client IPv4 for auth token binding.
+///
+/// - **STA (joins existing Wi‑Fi):** peer is the phone/PC on the same LAN as the ESP.
+/// - **SoftAP (ESP is the AP):** peer is the station on the ESP subnet (e.g. 192.168.4.x).
 pub fn client_ipv4(
     req: &mut Request<&mut esp_idf_svc::http::server::EspHttpConnection>,
 ) -> anyhow::Result<String> {
-    let ip = req
+    let raw = req
         .connection()
         .raw_connection()
-        .context("Falha de autenticacao")?
-        .source_ipv4()
-        .map_err(|_| anyhow::anyhow!("Falha de autenticacao"))?;
-    Ok(normalize_client_ip(ip))
+        .context("Falha de autenticacao")?;
+
+    #[cfg(esp_idf_lwip_ipv4)]
+    if let Ok(ip) = raw.source_ipv4() {
+        if let Some(ip) = usable_ipv4(ip) {
+            log::debug!("client ip from source_ipv4: {ip}");
+            return Ok(ip.to_string());
+        }
+    }
+
+    if let Some(ip) = unsafe { peer_ipv4_from_httpd(raw.handle()) } {
+        log::info!(
+            "client ip from socket ({}): {ip}",
+            network::topology_label()
+        );
+        return Ok(ip.to_string());
+    }
+
+    #[cfg(esp_idf_lwip_ipv6)]
+    if let Ok(v6) = raw.source_ipv6() {
+        if let Some(ip) = crate::middleware::client_ip::ipv4_from_ipv6(v6).and_then(usable_ipv4) {
+            log::info!(
+                "client ip from source_ipv6 ({}): {ip}",
+                network::topology_label()
+            );
+            return Ok(ip.to_string());
+        }
+    }
+
+    if let Some(ip) = unsafe { network::softap_peer_ipv4_from_dhcp() } {
+        log::info!(
+            "client ip from softap dhcp ({}): {ip}",
+            network::topology_label()
+        );
+        return Ok(ip.to_string());
+    }
+
+    log::warn!(
+        "could not resolve client ipv4 for auth binding (topology={})",
+        network::topology_label()
+    );
+    Err(anyhow::anyhow!("Falha de autenticacao"))
 }
 
 pub fn check_admin_auth(ctx: &RequestContext) -> anyhow::Result<()> {

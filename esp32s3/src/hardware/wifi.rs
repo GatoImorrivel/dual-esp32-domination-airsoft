@@ -1,8 +1,13 @@
 use std::fmt::Debug;
 
 use anyhow::Ok;
-use esp_idf_svc::wifi::{AccessPointConfiguration, AsyncWifi, ClientConfiguration, EspWifi};
+use esp_idf_svc::{
+    handle::RawHandle,
+    wifi::{AccessPointConfiguration, AsyncWifi, ClientConfiguration, EspWifi},
+};
 use serde::{Deserialize, Serialize};
+
+use crate::hardware::network;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WifiConfig {
@@ -23,6 +28,10 @@ impl Debug for Wifi {
 
 impl Wifi {
     pub fn init(wifi: AsyncWifi<EspWifi<'static>>) -> Self {
+        network::init_netifs(
+            wifi.wifi().ap_netif().handle(),
+            wifi.wifi().sta_netif().handle(),
+        );
         Self { wifi, config: None }
     }
 
@@ -75,6 +84,7 @@ impl Wifi {
             ssid: new_ssid.as_ref().to_owned(),
             password: password.as_ref().to_owned(),
         });
+        network::set_station_topology();
 
         Ok(())
     }
@@ -100,6 +110,7 @@ impl Wifi {
         self.wifi.start().await?;
 
         self.config = Some(WifiConfig::APMode);
+        network::set_softap_topology();
 
         Ok(())
     }
