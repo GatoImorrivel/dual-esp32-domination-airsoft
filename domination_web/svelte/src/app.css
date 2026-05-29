@@ -1,91 +1,219 @@
+html.theme-light {
+  --color-bg: #ffffff;
+  --color-fg: #0a0a0a;
+  --color-muted: #737373;
+  --color-border: #e5e5e5;
+  --color-surface: #f5f5f5;
+  --color-primary: #171717;
+  --color-primary-fg: #fafafa;
+  --color-track: #e5e5e5;
+  --color-overlay: rgba(0, 0, 0, 0.5);
+  --color-toast-info-bg: #f5f5f5;
+  --color-toast-info-fg: #0a0a0a;
+  --color-toast-error-bg: #0a0a0a;
+  --color-toast-error-fg: #fafafa;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+}
+
+html.theme-dark {
+  --color-bg: #0a0a0a;
+  --color-fg: #fafafa;
+  --color-muted: #a3a3a3;
+  --color-border: #262626;
+  --color-surface: #171717;
+  --color-primary: #fafafa;
+  --color-primary-fg: #171717;
+  --color-track: #262626;
+  --color-overlay: rgba(0, 0, 0, 0.65);
+  --color-toast-info-bg: #262626;
+  --color-toast-info-fg: #fafafa;
+  --color-toast-error-bg: #fafafa;
+  --color-toast-error-fg: #0a0a0a;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+}
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-:global(html, body) {
+:global(html) {
   margin: 0;
   padding: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-body {
+:global(body) {
   margin: 0;
-  display: flex;
-  place-items: center;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   min-width: 320px;
-  min-height: 100vh;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+:global(#app) {
+  width: 100%;
+  height: 100%;
+  max-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  text-align: initial;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
-.card {
-  padding: 2em;
-}
-
-#app {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
+/* Strip native OS button chrome (critical on mobile WebKit / ESP32 browser) */
+:global(button) {
+  -webkit-appearance: none;
+  appearance: none;
+  font: inherit;
+  color: inherit;
   cursor: pointer;
-  transition: border-color 0.25s;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
 }
 
-button:hover {
-  border-color: #646cff;
+:global(button:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+:global(button:focus-visible) {
+  outline: 2px solid var(--color-fg);
+  outline-offset: 2px;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
+/* Primary action — matches Config.svelte .configure */
+:global(.btn-primary) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 20px;
+  border-radius: 14px;
+  border: 2px solid var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-primary-fg);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  transition: filter 0.15s ease;
+}
 
-  a:hover {
-    color: #747bff;
-  }
+:global(.btn-primary:hover:not(:disabled)) {
+  filter: brightness(0.92);
+}
 
-  button {
-    background-color: #f9f9f9;
-  }
+:global(.btn-primary.btn-block) {
+  width: 100%;
+}
+
+/* Secondary / outline — matches Config.svelte option buttons */
+:global(.btn-secondary) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 20px;
+  border-radius: 14px;
+  border: 2px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+:global(.btn-secondary:hover:not(:disabled)) {
+  border-color: var(--color-fg);
+  background: var(--color-surface);
+}
+
+:global(.btn-secondary.btn-block) {
+  width: 100%;
+}
+
+/* Large tappable cards (admin hub, wifi options) */
+:global(.btn-card) {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 2px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-weight: 600;
+  line-height: 1.3;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+:global(.btn-card:hover:not(:disabled)) {
+  border-color: var(--color-fg);
+  background: var(--color-surface);
+}
+
+:global(.btn-card-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-fg);
+}
+
+:global(.btn-card-desc) {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-muted);
+}
+
+:global(.btn-card.selected) {
+  border-color: var(--color-fg);
+  background: var(--color-surface);
+}
+
+/* Toolbar icon buttons */
+:global(.icon-btn) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+:global(.icon-btn:hover:not(:disabled)) {
+  border-color: var(--color-fg);
+  background: var(--color-surface);
+}
+
+:global(.btn-pill) {
+  border-radius: 999px;
 }

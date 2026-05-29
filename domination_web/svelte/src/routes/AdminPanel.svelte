@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import LinkedTeamTimes from "../components/LinkedTeamTimes.svelte";
+  import AdminBluetooth from "../components/admin/AdminBluetooth.svelte";
+  import AdminGame from "../components/admin/AdminGame.svelte";
+  import BackButton from "../components/BackButton.svelte";
+  import UiButton from "../components/UiButton.svelte";
+  import UiCardButton from "../components/UiCardButton.svelte";
   import {
     clearSession,
     isLoggedIn,
@@ -23,11 +27,14 @@
     blue_time_to_win: Duration;
   };
 
+  type AdminView = "hub" | "bluetooth" | "game";
+
   let showLoginModal = false;
   let username = "";
   let password = "";
   let loggingIn = false;
   let authenticated = false;
+  let adminView: AdminView = "hub";
 
   let config: GameConfig | null = null;
   let redSecs = 10;
@@ -101,6 +108,7 @@
     username = "";
     password = "";
     btState = null;
+    adminView = "hub";
   }
 
   async function scanBluetooth() {
@@ -134,7 +142,7 @@
     btActionAddress = sink.address;
     try {
       btState = await pairSink(sink.address);
-      toast.notify(`Emparelhado com ${displayName(sink)}`, "info");
+      toast.notify(`Emparelhado com ${sink.name ?? sink.address}`, "info");
     } catch (e) {
       console.error(e);
       toast.notify("Falha ao emparelhar", "error");
@@ -154,16 +162,6 @@
     } finally {
       btActionAddress = null;
     }
-  }
-
-  function displayName(sink: AudioSink): string {
-    return sink.name ?? sink.address;
-  }
-
-  function isPaired(sink: AudioSink): boolean {
-    return (
-      btState?.paired?.address.toLowerCase() === sink.address.toLowerCase()
-    );
   }
 
   async function startGame() {
@@ -221,107 +219,68 @@
           autocomplete="current-password"
         />
       </label>
-      <button
-        class="primary"
+      <UiButton
+        variant="primary"
+        block
         disabled={loggingIn || !username || !password}
         on:click={submitLogin}
       >
         {loggingIn ? "Entrando…" : "Entrar"}
-      </button>
+      </UiButton>
     </div>
   </div>
 {/if}
 
 {#if authenticated}
-  <div class="container">
-    <header>
+  <div class="page">
+    <header class="page-header">
+      <div class="header-start">
+        {#if adminView === "hub"}
+          <BackButton to="/leaderboard" />
+        {:else}
+          <BackButton label="Voltar" onBack={() => (adminView = "hub")} />
+        {/if}
+      </div>
       <h1>Administração</h1>
-      <button class="logout" on:click={logout}>Sair</button>
+      <div class="logout-wrap">
+        <UiButton variant="secondary" pill on:click={logout}>Sair</UiButton>
+      </div>
     </header>
 
-    <section class="panel-section">
-      <h2>Áudio Bluetooth</h2>
-      <p class="section-hint">Selecione o alto-falante para anunciar eventos da partida.</p>
-
-      <button
-        class="secondary"
-        on:click={scanBluetooth}
-        disabled={btLoading}
-      >
-        {btLoading ? "Buscando…" : "Buscar dispositivos"}
-      </button>
-
-      {#if btState?.paired}
-        <div class="paired-banner">
-          <span>Emparelhado:</span>
-          <strong>{displayName(btState.paired)}</strong>
-          <button
-            class="text-btn"
-            on:click={handleUnpair}
-            disabled={btActionAddress !== null}
-          >
-            {btActionAddress === "unpair" ? "…" : "Desemparelhar"}
-          </button>
+    <!-- Mobile: hub + drill-down -->
+    <div class="content" class:scroll-inner={adminView !== "hub"}>
+      {#if adminView === "hub"}
+        <div class="hub">
+          <UiCardButton on:click={() => (adminView = "bluetooth")}>
+            <span slot="title">Áudio Bluetooth</span>
+            <span slot="desc">Emparelhar alto-falante e buscar dispositivos</span>
+          </UiCardButton>
+          <UiCardButton on:click={() => (adminView = "game")}>
+            <span slot="title">Partida</span>
+            <span slot="desc">Iniciar, parar e configurar tempos</span>
+          </UiCardButton>
         </div>
+      {:else if adminView === "bluetooth"}
+        <AdminBluetooth
+          {btState}
+          {btLoading}
+          {btActionAddress}
+          onScan={scanBluetooth}
+          onPair={handlePair}
+          onUnpair={handleUnpair}
+        />
       {:else}
-        <p class="empty">Nenhum alto-falante emparelhado.</p>
+        <AdminGame
+          {progress}
+          bind:redSecs
+          bind:blueSecs
+          bind:timesLinked
+          onStart={startGame}
+          onStop={stopGame}
+          onSave={saveConfig}
+        />
       {/if}
-
-      {#if btState && btState.discovered.length > 0}
-        <ul class="sink-list">
-          {#each btState.discovered as sink (sink.address)}
-            <li class:paired={isPaired(sink)}>
-              <div class="sink-info">
-                <strong>{displayName(sink)}</strong>
-                <span class="mac">{sink.address}</span>
-              </div>
-              {#if isPaired(sink)}
-                <span class="tag">Ativo</span>
-              {:else}
-                <button
-                  class="small"
-                  on:click={() => handlePair(sink)}
-                  disabled={btActionAddress !== null}
-                >
-                  {btActionAddress === sink.address ? "…" : "Emparelhar"}
-                </button>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {:else if !btLoading}
-        <p class="empty">Nenhum dispositivo encontrado. Toque em buscar.</p>
-      {/if}
-    </section>
-
-    <section class="panel-section">
-      <h2>Partida</h2>
-      {#if progress}
-        <div class="status">
-          {#if progress.is_active}
-            <span class="badge running">Partida em andamento</span>
-          {:else}
-            <span class="badge stopped">Partida parada</span>
-          {/if}
-        </div>
-
-        <div class="controls">
-          <button on:click={startGame} disabled={progress.is_active}>
-            Iniciar
-          </button>
-          <button on:click={stopGame} disabled={!progress.is_active}>
-            Parar
-          </button>
-        </div>
-      {/if}
-    </section>
-
-    <section class="panel-section">
-      <LinkedTeamTimes bind:redSecs bind:blueSecs bind:timesLinked />
-      <button class="primary save" on:click={saveConfig}>
-        Salvar configuração
-      </button>
-    </section>
+    </div>
   </div>
 {/if}
 
@@ -329,7 +288,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--color-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -338,8 +297,9 @@
   }
 
   .modal {
-    background: #1e1e1e;
-    color: #f5f5f5;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    border: 1px solid var(--color-border);
     border-radius: 16px;
     padding: 24px;
     width: 100%;
@@ -353,11 +313,10 @@
     margin: 0;
   }
 
-  .hint,
-  .section-hint {
+  .hint {
     margin: 0;
     font-size: 0.85rem;
-    color: #a3a3a3;
+    color: var(--color-muted);
   }
 
   .modal label {
@@ -369,209 +328,81 @@
   .modal input {
     padding: 10px;
     border-radius: 8px;
-    border: 1px solid #444;
-    background: #111;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
     color: inherit;
   }
 
-  .container {
-    max-width: 520px;
-    margin: 40px auto;
-    padding: 24px;
+  .page {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     font-family: system-ui, sans-serif;
+    color: var(--color-fg);
+    background: var(--color-bg);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+      env(safe-area-inset-bottom) env(safe-area-inset-left);
+    box-sizing: border-box;
   }
 
-  header {
-    display: flex;
-    justify-content: space-between;
+  .page-header {
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    margin-bottom: 28px;
-  }
-
-  h1 {
-    margin: 0;
-    font-size: 1.75rem;
-  }
-
-  h2 {
-    margin: 0 0 8px;
-    font-size: 1.15rem;
-  }
-
-  .panel-section {
-    margin-bottom: 32px;
-    padding-bottom: 28px;
-    border-bottom: 1px solid #e5e5e5;
-  }
-
-  .panel-section:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-  }
-
-  .logout {
-    padding: 8px 14px;
-    border-radius: 8px;
-    border: 1px solid #666;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-  }
-
-  .status {
-    margin: 16px 0;
-  }
-
-  .badge {
-    display: inline-block;
-    padding: 8px 14px;
-    border-radius: 999px;
-    font-size: 0.9rem;
-    font-weight: 600;
-  }
-
-  .running {
-    background: #dcfce7;
-    color: #166534;
-  }
-
-  .stopped {
-    background: #fee2e2;
-    color: #991b1b;
-  }
-
-  .controls {
-    display: flex;
     gap: 12px;
+    padding: clamp(0.75rem, 2vw, 1.25rem) clamp(1rem, 4vw, 2rem);
+    border-bottom: 1px solid var(--color-border);
   }
 
-  .controls button,
-  .primary,
-  .secondary {
-    padding: 14px;
-    border-radius: 12px;
-    border: none;
-    font-weight: 600;
-    cursor: pointer;
-    font-size: 0.95rem;
+  .header-start {
+    justify-self: start;
   }
 
-  .controls button,
-  .primary {
+  .page-header h1 {
+    margin: 0;
+    font-size: clamp(1.25rem, 4vw, 1.75rem);
+    text-align: center;
+    justify-self: center;
+  }
+
+  .logout-wrap {
+    justify-self: end;
+  }
+
+  .content {
     flex: 1;
-    background: #3b82f6;
-    color: white;
-  }
-
-  .secondary {
-    width: 100%;
-    margin-bottom: 16px;
-    background: #e5e7eb;
-    color: #111;
-  }
-
-  .primary.save {
-    width: 100%;
-    margin-top: 8px;
-  }
-
-  .controls button:disabled,
-  .primary:disabled,
-  .secondary:disabled {
-    background: #9ca3af;
-    cursor: not-allowed;
-    color: #f3f4f6;
-  }
-
-  .paired-banner {
+    min-height: 0;
+    overflow: hidden;
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 12px;
-    border-radius: 10px;
-    background: #eff6ff;
-    margin-bottom: 12px;
-    font-size: 0.9rem;
+    flex-direction: column;
+    padding: clamp(0.75rem, 3vw, 1.25rem);
+    box-sizing: border-box;
   }
 
-  .text-btn {
-    margin-left: auto;
-    padding: 6px 10px;
-    border: none;
-    background: transparent;
-    color: #1d4ed8;
-    font-weight: 600;
-    cursor: pointer;
+  .content.scroll-inner {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
-  .empty {
-    font-size: 0.9rem;
-    color: #6b7280;
-    margin: 8px 0;
+  .content.scroll-inner :global(.panel-section) {
+    max-width: 560px;
+    margin: 0 auto;
+    width: 100%;
   }
 
-  .sink-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: grid;
-    gap: 8px;
-  }
-
-  .sink-list li {
+  .hub {
+    flex: 1;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px;
-    border-radius: 10px;
-    border: 1px solid #e5e7eb;
-    background: #fafafa;
-  }
-
-  .sink-list li.paired {
-    border-color: #3b82f6;
-    background: #f0f7ff;
-  }
-
-  .sink-info {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .sink-info strong {
-    font-size: 0.95rem;
-  }
-
-  .mac {
-    font-size: 0.75rem;
-    color: #6b7280;
-    font-family: monospace;
-  }
-
-  .tag {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: #1d4ed8;
-    text-transform: uppercase;
-  }
-
-  .small {
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: none;
-    background: #3b82f6;
-    color: white;
-    font-weight: 600;
-    font-size: 0.85rem;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .small:disabled {
-    background: #9ca3af;
-    cursor: not-allowed;
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+    max-width: 480px;
+    width: 100%;
+    margin: 0 auto;
+    overflow: hidden;
   }
 </style>

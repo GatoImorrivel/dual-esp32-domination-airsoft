@@ -12,7 +12,7 @@
 
 <style>
   .container {
-    min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -21,10 +21,12 @@
     padding: 24px;
     font-family: system-ui, sans-serif;
     text-align: center;
+    color: var(--color-fg);
+    background: var(--color-bg);
   }
 
   p {
     font-size: 1.1rem;
-    color: #6b7280;
+    color: var(--color-muted);
   }
 </style>

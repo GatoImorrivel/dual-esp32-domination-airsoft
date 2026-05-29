@@ -16,7 +16,7 @@
   .spinner {
     border-radius: 50%;
     border-style: solid;
-    border-color: #3b82f6 transparent #3b82f6 transparent;
+    border-color: var(--color-fg) transparent var(--color-fg) transparent;
     animation: spin 0.8s linear infinite;
   }
 

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import BackButton from "../components/BackButton.svelte";
+  import UiButton from "../components/UiButton.svelte";
   import { navigate } from "../lib/router";
 
   export let title: string = "Erro ao carregar";
@@ -9,30 +11,26 @@
   function retry() {
     if (retryPath) navigate(retryPath);
   }
-
-  function goHome() {
-    navigate(homePath);
-  }
 </script>
 
 <div class="container">
-  <div class="icon">⚠️</div>
+  <div class="icon" aria-hidden="true">!</div>
 
   <h1>{title}</h1>
   <p>{message}</p>
 
   <div class="actions">
     {#if retryPath}
-      <button class="primary" on:click={retry}> Tentar novamente </button>
+      <UiButton variant="primary" block on:click={retry}>Tentar novamente</UiButton>
     {/if}
 
-    <button class="secondary" on:click={goHome}> Voltar ao início </button>
+    <BackButton label="Voltar ao início" to={homePath} />
   </div>
 </div>
 
 <style>
   .container {
-    min-height: 100vh;
+    min-height: 100dvh;
     max-width: 500px;
     margin: 0 auto;
     padding: 32px 24px;
@@ -43,19 +41,29 @@
     gap: 20px;
     text-align: center;
     font-family: system-ui, sans-serif;
+    color: var(--color-fg);
+    background: var(--color-bg);
   }
 
   .icon {
-    font-size: 48px;
+    font-size: 3rem;
+    font-weight: 800;
+    width: 4rem;
+    height: 4rem;
+    line-height: 4rem;
+    border-radius: 50%;
+    border: 2px solid var(--color-border);
   }
 
   h1 {
     font-size: 1.8rem;
+    margin: 0;
   }
 
   p {
-    color: #6b7280;
+    color: var(--color-muted);
     font-size: 1rem;
+    margin: 0;
   }
 
   .actions {
@@ -63,29 +71,13 @@
     flex-direction: column;
     gap: 12px;
     width: 100%;
+    max-width: 280px;
     margin-top: 12px;
+    align-items: stretch;
   }
 
-  button {
-    padding: 14px;
-    border-radius: 14px;
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-    font-size: 1rem;
-  }
-
-  .primary {
-    background: #3b82f6;
-    color: white;
-  }
-
-  .secondary {
-    background: #e5e7eb;
-    color: #111827;
-  }
-
-  button:hover {
-    opacity: 0.9;
+  .actions :global(.back-btn) {
+    justify-content: center;
+    width: 100%;
   }
 </style>

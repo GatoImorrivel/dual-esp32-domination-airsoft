@@ -7,7 +7,7 @@
   {#each $toast as t (t.id)}
     <div class="toast {t.type}" in:fly={{ y: -20, duration: 200 }} out:fade>
       <span>{t.message}</span>
-      <button on:click={() => toast.remove(t.id)}>✕</button>
+      <button type="button" on:click={() => toast.remove(t.id)}>✕</button>
     </div>
   {/each}
 </div>
@@ -36,8 +36,9 @@
     justify-content: space-between;
     align-items: center;
     pointer-events: auto;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 6px 18px var(--color-overlay);
     font-family: system-ui, sans-serif;
+    border: 1px solid var(--color-border);
   }
 
   .toast span {
@@ -50,24 +51,22 @@
     font-size: 1rem;
     cursor: pointer;
     opacity: 0.7;
+    color: inherit;
+    padding: 0.25rem;
   }
 
   .toast button:hover {
     opacity: 1;
   }
 
-  .info {
-    background: #dbeafe;
-    color: #1e40af;
-  }
-
+  .info,
   .warn {
-    background: #fef3c7;
-    color: #92400e;
+    background: var(--color-toast-info-bg);
+    color: var(--color-toast-info-fg);
   }
 
   .error {
-    background: #fee2e2;
-    color: #991b1b;
+    background: var(--color-toast-error-bg);
+    color: var(--color-toast-error-fg);
   }
 </style>
