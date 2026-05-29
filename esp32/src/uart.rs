@@ -23,6 +23,9 @@ struct PendingPlay {
     offset: usize,
 }
 
+/// Bytes fed into the A2DP ringbuffer per bridge-loop tick (~90 ms audio at 176.4 kB/s).
+const PUMP_BYTES_PER_TICK: usize = 16 * 1024;
+
 pub fn spawn_bridge(bt: Arc<BluetoothAudio>, mut uart: UartDriver<'static>) {
     configure_app_pthread(b"uart_bt\0", 12 * 1024);
     std::thread::Builder::new()
@@ -86,31 +89,48 @@ fn bridge_loop(bt: Arc<BluetoothAudio>, uart: &mut UartDriver<'static>) -> Resul
             }
         }
 
-        tick_pending_play(&bt, &mut pending_play);
-        std::thread::sleep(Duration::from_millis(5));
+        pump_pending_play(&bt, &mut pending_play, PUMP_BYTES_PER_TICK);
+
+        let sleep_ms = if pending_play.is_some() { 1 } else { 5 };
+        std::thread::sleep(Duration::from_millis(sleep_ms));
     }
 }
 
-fn tick_pending_play(bt: &BluetoothAudio, pending: &mut Option<PendingPlay>) {
-    let Some(p) = pending.as_mut() else {
-        return;
-    };
-    if active_play_id() != p.play_id {
-        *pending = None;
-        return;
-    }
-    let Some(pcm) = audio::pcm_for_sound(p.sound_id) else {
-        log::warn!("unknown sound_id {}", p.sound_id);
-        *pending = None;
-        return;
-    };
-    if p.offset >= pcm.len() {
-        *pending = None;
-        return;
-    }
-    let end = (p.offset + MAX_CHUNK).min(pcm.len());
-    if bt.try_send_bytes(&pcm[p.offset..end]) {
-        p.offset = end;
+/// Push up to `max_bytes` of embedded PCM into the ringbuffer.
+fn pump_pending_play(
+    bt: &BluetoothAudio,
+    pending: &mut Option<PendingPlay>,
+    max_bytes: usize,
+) {
+    let mut pumped = 0usize;
+    while pumped < max_bytes {
+        let Some(p) = pending.as_mut() else {
+            break;
+        };
+        if active_play_id() != p.play_id {
+            *pending = None;
+            break;
+        }
+        let Some(pcm) = audio::pcm_for_sound(p.sound_id) else {
+            log::warn!("unknown sound_id {}", p.sound_id);
+            *pending = None;
+            break;
+        };
+        if p.offset >= pcm.len() {
+            *pending = None;
+            break;
+        }
+        let end = (p.offset + MAX_CHUNK).min(pcm.len());
+        if bt.try_send_bytes(&pcm[p.offset..end]) {
+            pumped += end - p.offset;
+            p.offset = end;
+            if p.offset >= pcm.len() {
+                *pending = None;
+                break;
+            }
+        } else {
+            break;
+        }
     }
 }
 
@@ -197,6 +217,10 @@ fn handle_frame(
                 sound_id,
                 offset: 0,
             });
+            // Prime the ringbuffer before returning so A2DP does not start on silence.
+            for _ in 0..4 {
+                pump_pending_play(bt, pending_play, PUMP_BYTES_PER_TICK);
+            }
             log::info!("playing sound {sound_id} play_id={play_id}");
             Response::Ok
         }

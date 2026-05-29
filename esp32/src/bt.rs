@@ -144,29 +144,36 @@ impl BluetoothAudio {
                 1
             }
             A2dpEvent::SourceData(buffer) => {
-                let mut copied = 0;
+                let mut filled = 0usize;
                 unsafe {
-                    let mut size = 0;
-                    let item = xRingbufferReceiveUpTo(
-                        bt.ring_buf.0,
-                        &mut size,
-                        0,
-                        buffer.len(),
-                    );
-                    if !item.is_null() {
+                    while filled < buffer.len() {
+                        let mut size = 0;
+                        let item = xRingbufferReceiveUpTo(
+                            bt.ring_buf.0,
+                            &mut size,
+                            0,
+                            buffer.len() - filled,
+                        );
+                        if item.is_null() {
+                            break;
+                        }
                         core::ptr::copy_nonoverlapping(
                             item as *const u8,
-                            buffer.as_mut_ptr(),
+                            buffer.as_mut_ptr().add(filled),
                             size,
                         );
                         vRingbufferReturnItem(bt.ring_buf.0, item);
-                        copied = size;
-                    } else {
-                        core::ptr::write_bytes(buffer.as_mut_ptr(), 0, buffer.len());
-                        copied = buffer.len();
+                        filled += size;
+                    }
+                    if filled < buffer.len() {
+                        core::ptr::write_bytes(
+                            buffer.as_mut_ptr().add(filled),
+                            0,
+                            buffer.len() - filled,
+                        );
                     }
                 }
-                copied
+                buffer.len()
             }
             any => {
                 log::info!("{any:?}");
