@@ -75,11 +75,11 @@ impl GameState {
         log::info!("Game stopped");
     }
 
-    /// Handle a button press
-    pub fn button_press(&mut self, team: Team) {
+    /// Handle a button press. Returns `true` if the game was active and ownership switched.
+    pub fn button_press(&mut self, team: Team) -> bool {
         if !self.active {
             log::info!("{team:#?} pressed the button, ignoring due to game being inactive");
-            return;
+            return false;
         }
 
         // First, account for time so far
@@ -89,6 +89,7 @@ impl GameState {
         self.current_team = Some(team);
 
         log::info!("{team:#?} pressed the button");
+        true
     }
 
     /// Call this periodically (e.g. every 50–100 ms)

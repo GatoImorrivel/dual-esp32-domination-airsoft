@@ -8,9 +8,13 @@ use crate::{
         server::HttpServer,
     },
 };
+use domination_uart::BAUD_RATE;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
-    hal::prelude::Peripherals,
+    hal::{
+        prelude::Peripherals,
+        uart::config::{Config as UartConfig, Mode},
+    },
     nvs::EspDefaultNvsPartition,
     sys::{
         heap_caps_get_free_size, heap_caps_get_largest_free_block, MALLOC_CAP_INTERNAL,
@@ -21,6 +25,7 @@ use esp_idf_svc::{
 };
 
 mod app;
+mod audio;
 mod bt;
 mod game;
 mod hardware;
@@ -48,6 +53,31 @@ fn main() -> anyhow::Result<()> {
 
     let peripherals = Peripherals::take()?;
     let nvs = EspDefaultNvsPartition::take()?;
+
+    #[cfg(not(test))]
+    {
+        let uart_config = UartConfig {
+            baudrate: esp_idf_svc::hal::units::Hertz(BAUD_RATE),
+            mode: Mode::UART,
+            ..Default::default()
+        };
+        let bt_uart = esp_idf_svc::hal::uart::UartDriver::new(
+            peripherals.uart1,
+            peripherals.pins.gpio4,
+            peripherals.pins.gpio5,
+            Option::<esp_idf_svc::hal::gpio::Gpio0>::None,
+            Option::<esp_idf_svc::hal::gpio::Gpio1>::None,
+            &uart_config,
+        )?;
+        bt::init_dispatcher(bt_uart)?;
+        log::info!("BT UART bridge ready (TX=GPIO4, RX=GPIO5, {} baud)", BAUD_RATE);
+        match bt::check_coprocessor() {
+            Ok(()) => log::info!("BT coprocessor reachable"),
+            Err(e) => log::warn!(
+                "BT coprocessor not reachable (flash esp32, check GPIO4/5↔17/16, GND): {e:#}"
+            ),
+        }
+    }
     let sys_loop = EspSystemEventLoop::take()?;
     let (wifi_modem, _bt_modem) = peripherals.modem.split();
 
@@ -82,12 +112,12 @@ fn main() -> anyhow::Result<()> {
             });
             let app = App::new(wifi);
             app.run(move |app| {
-                if red_btn.is_pressed() {
-                    app.mut_game().button_press(game::Team::Red);
+                if red_btn.is_pressed() && app.mut_game().button_press(game::Team::Red) {
+                    audio::play_team(game::Team::Red);
                 }
 
-                if blue_btn.is_pressed() {
-                    app.mut_game().button_press(game::Team::Blue);
+                if blue_btn.is_pressed() && app.mut_game().button_press(game::Team::Blue) {
+                    audio::play_team(game::Team::Blue);
                 }
 
                 Ok(())

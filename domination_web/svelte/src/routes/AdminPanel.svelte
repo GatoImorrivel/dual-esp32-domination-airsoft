@@ -107,7 +107,21 @@
     btLoading = true;
     try {
       btState = await scanSinks();
-      toast.notify("Busca concluída", "info");
+      if (btState.scanning) {
+        toast.notify("Buscando dispositivos…", "info");
+        const deadline = Date.now() + 20_000;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 1500));
+          btState = await listSinks();
+          if (!btState.scanning) {
+            toast.notify("Busca concluída", "info");
+            return;
+          }
+        }
+        toast.notify("Busca demorou demais", "error");
+      } else {
+        toast.notify("Busca concluída", "info");
+      }
     } catch (e) {
       console.error(e);
       toast.notify("Falha ao buscar dispositivos", "error");

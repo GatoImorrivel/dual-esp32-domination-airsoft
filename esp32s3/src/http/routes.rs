@@ -119,6 +119,9 @@ pub fn routes(server: &mut HttpServer) {
         .into())
     });
 
+    // Bluetooth admin API: delegates to `crate::bt` (UART dispatcher → ESP32 coprocessor).
+    // Firmware builds use the real bridge; `bt::mock` is only compiled under `cfg(test)`.
+
     server.get("/bt/sinks", |_, ctx| {
         check_admin_auth(ctx)?;
         Ok(Json::new(&bt::list_sinks()?)? .into())

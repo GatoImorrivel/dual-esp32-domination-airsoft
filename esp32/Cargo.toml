@@ -19,7 +19,8 @@ experimental = ["esp-idf-svc/experimental"]
 log = "0.4"
 esp-idf-svc = { version = "0.51", features = ["std", "experimental", "alloc", "default"] }
 anyhow = "1.0.100"
-domination_uart ={ path = "../domination_uart"}
+domination_uart = { path = "../domination_uart" }
+postcard = { version = "1.1.1", features = ["alloc"] }
 
 # --- Optional Embassy Integration ---
 # esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
@@ -38,5 +39,9 @@ domination_uart ={ path = "../domination_uart"}
 # esp-idf-svc = { version = "0.51", features = ["embassy-time-driver", "embassy-sync"] }
 # critical-section = { version = "1.1", features = ["std"], default-features = false }
 
+[package.metadata.esp-idf-sys]
+mcu = "esp32"
+sdkconfig_defaults = ["sdkconfig.defaults"]
+
 [build-dependencies]
-embuild = "0.33"
+embuild = { version = "0.33", features = ["espidf"] }
