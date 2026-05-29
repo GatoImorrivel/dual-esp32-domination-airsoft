@@ -25,9 +25,6 @@ function mockApiFetch(handlers: {
 }) {
   return vi.fn((url: string | URL, init?: RequestInit) => {
     const href = String(url);
-    if (href.includes("/ingest/")) {
-      return Promise.resolve({ ok: true });
-    }
     if (href.includes("/auth/challenge")) {
       return Promise.resolve(
         jsonResponse(handlers.challenge ?? { nonce: "test-nonce-fixed" })

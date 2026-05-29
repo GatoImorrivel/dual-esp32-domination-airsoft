@@ -109,17 +109,14 @@ pub fn routes(server: &mut HttpServer) {
             .client_ip
             .clone()
             .ok_or_else(|| anyhow::anyhow!("Falha ao gerar token"))?;
-        log::info!("auth login for ip={}", ip);
         let user_manager = user_manager();
         let token = user_manager
             .generate_token(body.username, body.password, ip)
-            .map_err(|e| {
-                log::warn!("auth login failed: {}", e);
-                anyhow::anyhow!("Falha ao gerar token")
-            })?;
-        let token_str = token.into_string();
-        log::info!("auth login ok, token_len={}", token_str.len());
-        Ok(Json::new(&LoginResponse { token: token_str })?.into())
+            .map_err(|_| anyhow::anyhow!("Falha ao gerar token"))?;
+        Ok(Json::new(&LoginResponse {
+            token: token.into_string(),
+        })?
+        .into())
     });
 
     server.get("/bt/sinks", |_, ctx| {

@@ -118,8 +118,6 @@ impl HttpServer {
                         client_ip: client_ipv4(&mut request).ok(),
                         authorization: request.header("Authorization").map(str::to_string),
                     };
-                    log::info!("HTTP GET {} ip={:?}", request.uri(), ctx.client_ip);
-
                     match handler(&mut request, &ctx) {
                         Ok(response) => send_response(request, response),
                         Err(err) => {
@@ -157,8 +155,6 @@ impl HttpServer {
                         client_ip: client_ipv4(&mut request).ok(),
                         authorization: request.header("Authorization").map(str::to_string),
                     };
-                    log::info!("HTTP POST {} ip={:?}", request.uri(), ctx.client_ip);
-
                     let len = match request
                         .header("Content-Length")
                         .unwrap_or("0")

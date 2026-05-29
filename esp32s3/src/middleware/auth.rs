@@ -106,40 +106,27 @@ pub fn client_ipv4(
     #[cfg(esp_idf_lwip_ipv4)]
     if let Ok(ip) = raw.source_ipv4() {
         if let Some(ip) = usable_ipv4(ip) {
-            log::debug!("client ip from source_ipv4: {ip}");
             return Ok(ip.to_string());
         }
     }
 
     if let Some(ip) = unsafe { peer_ipv4_from_httpd(raw.handle()) } {
-        log::info!(
-            "client ip from socket ({}): {ip}",
-            network::topology_label()
-        );
         return Ok(ip.to_string());
     }
 
     #[cfg(esp_idf_lwip_ipv6)]
     if let Ok(v6) = raw.source_ipv6() {
         if let Some(ip) = crate::middleware::client_ip::ipv4_from_ipv6(v6).and_then(usable_ipv4) {
-            log::info!(
-                "client ip from source_ipv6 ({}): {ip}",
-                network::topology_label()
-            );
             return Ok(ip.to_string());
         }
     }
 
     if let Some(ip) = unsafe { network::softap_peer_ipv4_from_dhcp() } {
-        log::info!(
-            "client ip from softap dhcp ({}): {ip}",
-            network::topology_label()
-        );
         return Ok(ip.to_string());
     }
 
     log::warn!(
-        "could not resolve client ipv4 for auth binding (topology={})",
+        "could not resolve client ipv4 (topology={})",
         network::topology_label()
     );
     Err(anyhow::anyhow!("Falha de autenticacao"))
