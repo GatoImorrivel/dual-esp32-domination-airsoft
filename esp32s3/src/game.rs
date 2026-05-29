@@ -115,7 +115,7 @@ impl GameState {
         self.last_tick = Some(now);
 
         if let Some(winner) = self.winner() {
-            match (winner) {
+            match winner {
                 Team::Red => log::info!("Red team won"),
                 Team::Blue => log::info!("Blue team won"),
             }

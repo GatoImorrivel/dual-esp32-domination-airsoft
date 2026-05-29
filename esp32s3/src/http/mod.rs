@@ -10,9 +10,9 @@ pub enum ResponseBody {
 }
 
 pub struct Response {
-    status_code: u16,
-    content_type: ContentType,
-    body: ResponseBody,
+    pub status_code: u16,
+    pub content_type: ContentType,
+    pub body: ResponseBody,
 }
 
 impl Response {
@@ -24,22 +24,44 @@ impl Response {
         }
     }
 
-    pub fn body(&self) -> &[u8] {
-        match &self.body {
-            ResponseBody::StaticString(payload) => payload.as_bytes(),
-            ResponseBody::String(payload) => payload.as_bytes(),
-            ResponseBody::Bytes(payload) => payload,
+    pub fn unauthorized() -> Self {
+        Self {
+            body: ResponseBody::StaticString("Nao autorizado"),
+            content_type: ContentType::Text,
+            status_code: 401,
         }
     }
+
+    pub fn write_body<W>(&self, writer: &mut W) -> Result<(), W::Error>
+    where
+        W: embedded_svc::io::Write,
+    {
+        match &self.body {
+            ResponseBody::StaticString(payload) => {
+                write_all_embedded(writer, payload.as_bytes())
+            }
+            ResponseBody::String(payload) => write_all_embedded(writer, payload.as_bytes()),
+            ResponseBody::Bytes(payload) => write_all_embedded(writer, payload),
+        }
+    }
+}
+
+pub(crate) fn write_all_embedded<W>(writer: &mut W, mut data: &[u8]) -> Result<(), W::Error>
+where
+    W: embedded_svc::io::Write,
+{
+    while !data.is_empty() {
+        let written = writer.write(data)?;
+        data = &data[written..];
+    }
+    Ok(())
 }
 
 pub struct Json(String);
 
 impl Json {
     pub fn new<T: Serialize + ?Sized>(data: &T) -> anyhow::Result<Self> {
-        Ok(Self {
-            0: serde_json::to_string(data)?,
-        })
+        Ok(Self(serde_json::to_string(data)?))
     }
 }
 
@@ -51,6 +73,12 @@ impl Into<Response> for Json {
             body: ResponseBody::String(self.0),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestContext {
+    pub client_ip: Option<String>,
+    pub authorization: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]

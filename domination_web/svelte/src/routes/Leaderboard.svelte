@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { get, post } from "../lib/http";
+  import { get } from "../lib/http";
   import { toast } from "../lib/toast";
 
   type Duration = { secs: number; nanos: number };
@@ -16,16 +16,6 @@
   async function load() {
     progress = await get("/game/progress");
     config = await get("/game/config");
-  }
-
-  async function start() {
-    await post("/game/start");
-    await load();
-  }
-
-  async function stop() {
-    await post("/game/stop");
-    await load();
   }
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -119,10 +109,6 @@
       </div>
     </div>
 
-    <div class="controls">
-      <button on:click={start} disabled={progress.is_active}> Iniciar </button>
-      <button on:click={stop} disabled={!progress.is_active}> Parar </button>
-    </div>
   {/if}
 </div>
 
@@ -208,27 +194,6 @@
     background: linear-gradient(to right, #3b82f6, #2563eb);
   }
 
-  .controls {
-    display: flex;
-    gap: 16px;
-  }
-
-  .controls button {
-    flex: 1;
-    padding: 16px;
-    border-radius: 14px;
-    border: none;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    background: #3b82f6;
-    color: white;
-  }
-
-  .controls button:disabled {
-    background: #6b7280;
-    cursor: not-allowed;
-  }
   .winner-banner {
     width: 100%;
     padding: 28px 16px;

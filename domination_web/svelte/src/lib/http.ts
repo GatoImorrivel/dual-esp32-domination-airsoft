@@ -1,31 +1,58 @@
-export const BASE_URL = "http://sandi-dominacao.local"
+import { getValidToken } from "./auth";
 
-export async function post<B, R>(route: string, body?: B, headers?: Record<string, string>, baseUrl = BASE_URL): Promise<R> {
+export const BASE_URL = "http://sandi-dominacao.local";
+
+export class UnauthorizedError extends Error {
+  constructor(message = "Não autorizado") {
+    super(message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+function buildUrl(route: string, baseUrl: string): string {
   const noStartSlashesRoute = route.replace(/^\/+/, "");
   const noTraillingSlashesBaseUrl = baseUrl.replace(/\/+$/, "");
+  return `${noTraillingSlashesBaseUrl}/${noStartSlashesRoute}`;
+}
 
-  if (baseUrl === BASE_URL && !body) {
-    body = {} as any;
+function jsonHeaders(extra?: Record<string, string>): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
+
+export async function post<R>(
+  route: string,
+  body?: unknown,
+  headers?: Record<string, string>,
+  baseUrl = BASE_URL
+): Promise<R> {
+  if (baseUrl === BASE_URL && body === undefined) {
+    body = {};
   }
 
-  const request = await fetch(`${noTraillingSlashesBaseUrl}/${noStartSlashesRoute}`, {
+  const request = await fetch(buildUrl(route, baseUrl), {
     body: JSON.stringify(body),
-    headers,
-    method: "POST"
+    headers: jsonHeaders(headers),
+    method: "POST",
   });
 
   const response = await request.text();
 
-  if (request.headers.get("Content-Type") === "application/json") {
+  if (request.status === 401 || request.status === 403) {
+    throw new UnauthorizedError();
+  }
+
+  if (!request.ok) {
+    throw new Error(response || `HTTP ${request.status}`);
+  }
+
+  if (request.headers.get("Content-Type")?.includes("application/json")) {
     try {
-      const json = JSON.parse(response);
-      return json as R;
+      return JSON.parse(response) as R;
     } catch (e) {
-      console.error({
-        cause: e,
-        response,
-        request
-      });
+      console.error({ cause: e, response, request });
       throw e;
     }
   }
@@ -33,16 +60,46 @@ export async function post<B, R>(route: string, body?: B, headers?: Record<strin
   return response as R;
 }
 
-export async function get<R>(route: string, headers?: Record<string, string>, baseUrl = BASE_URL): Promise<R> {
-  const noStartSlashesRoute = route.replace(/^\/+/, "");
-  const noTraillingSlashesBaseUrl = baseUrl.replace(/\/+$/, "");
-
-  const request = await fetch(`${noTraillingSlashesBaseUrl}/${noStartSlashesRoute}`, {
+export async function get<R>(
+  route: string,
+  headers?: Record<string, string>,
+  baseUrl = BASE_URL
+): Promise<R> {
+  const request = await fetch(buildUrl(route, baseUrl), {
     headers,
-    method: "GET"
+    method: "GET",
   });
 
-  const response = await request.json();
+  if (request.status === 401 || request.status === 403) {
+    throw new UnauthorizedError();
+  }
 
-  return response as R;
+  if (!request.ok) {
+    const text = await request.text();
+    throw new Error(text || `HTTP ${request.status}`);
+  }
+
+  return (await request.json()) as R;
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getValidToken();
+  return { Authorization: token };
+}
+
+export async function authorizedPost<R>(
+  route: string,
+  body?: unknown,
+  baseUrl = BASE_URL
+): Promise<R> {
+  const headers = await authHeaders();
+  return post<R>(route, body, headers, baseUrl);
+}
+
+export async function authorizedGet<R>(
+  route: string,
+  baseUrl = BASE_URL
+): Promise<R> {
+  const headers = await authHeaders();
+  return get<R>(route, headers, baseUrl);
 }

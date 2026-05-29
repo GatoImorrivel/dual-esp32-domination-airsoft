@@ -11,7 +11,6 @@ use crate::{
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     hal::prelude::Peripherals,
-    mdns::EspMdns,
     nvs::EspDefaultNvsPartition,
     sys::{
         heap_caps_get_free_size, heap_caps_get_largest_free_block, MALLOC_CAP_INTERNAL,
@@ -22,10 +21,26 @@ use esp_idf_svc::{
 };
 
 mod app;
+mod bt;
 mod game;
 mod hardware;
 mod http;
 mod middleware;
+
+#[cfg(any(
+    esp_idf_comp_mdns_enabled,
+    esp_idf_comp_espressif__mdns_enabled
+))]
+fn init_mdns() -> anyhow::Result<()> {
+    use esp_idf_svc::mdns::EspMdns;
+
+    let mut mdns = EspMdns::take().unwrap();
+    mdns.set_hostname("sandi-dominacao").unwrap();
+    mdns.add_service(Some("Sandi Dominacao"), "_http", "_tcp", 80, &[])
+        .unwrap();
+    core::mem::forget(mdns);
+    Ok(())
+}
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -49,11 +64,11 @@ fn main() -> anyhow::Result<()> {
     routes(&mut server);
     core::mem::forget(server);
 
-    let mut mdns = EspMdns::take().unwrap();
-    mdns.set_hostname("sandi-dominacao").unwrap();
-    mdns.add_service(Some("Sandi Dominacao"), "_http", "_tcp", 80, &[])
-        .unwrap();
-    core::mem::forget(mdns);
+    #[cfg(any(
+        esp_idf_comp_mdns_enabled,
+        esp_idf_comp_espressif__mdns_enabled
+    ))]
+    init_mdns()?;
 
     let red_btn = InputButton::new(peripherals.pins.gpio8, 50)?;
     let blue_btn = InputButton::new(peripherals.pins.gpio18, 50)?;
@@ -62,7 +77,8 @@ fn main() -> anyhow::Result<()> {
         .stack_size(16 * 1024)
         .spawn(move || {
             esp_idf_svc::hal::task::block_on(async {
-                wifi.ap_mode().await.unwrap();
+                // wifi.ap_mode().await.unwrap();
+                wifi.client_mode("Ruptura-2G", "5himikug@_2G").await.unwrap();
             });
             let app = App::new(wifi);
             app.run(move |app| {

@@ -1,47 +1,47 @@
-use crate::middleware::auth::UserManager;
+use crate::middleware::auth::{check_admin_auth, user_manager};
 use domination_web::{web_files, Dir};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     app::client::AppClient,
+    bt,
     game::GameConfig,
     hardware::wifi::WifiConfig,
     http::{server::HttpServer, ContentType, Json, Response, ResponseBody},
-    middleware::auth::check_admin_auth_from_request,
 };
 
 pub fn routes(server: &mut HttpServer) {
     #[derive(Debug, Clone, Copy, Deserialize)]
     struct EmptyRequest {}
 
-    server.get("/game/progress", |_| {
+    server.get("/game/progress", |_, _| {
         let client = AppClient::get();
         let progress = client.get_match_progress()?;
         Ok(Json::new(&progress)?.into())
     });
 
-    server.post("/game/start", |_: EmptyRequest, mut req| {
-        check_admin_auth_from_request(&mut req)?;
+    server.post("/game/start", |_: EmptyRequest, _, ctx| {
+        check_admin_auth(ctx)?;
         let client = AppClient::get();
         client.start_game()?;
         Ok(Response::ok())
     });
 
-    server.post("/game/stop", |_: EmptyRequest, mut req| {
-        check_admin_auth_from_request(&mut req)?;
+    server.post("/game/stop", |_: EmptyRequest, _, ctx| {
+        check_admin_auth(ctx)?;
         let client = AppClient::get();
         client.stop_game()?;
         Ok(Response::ok())
     });
 
-    server.post("/game/config", |config: GameConfig, mut req| {
-        check_admin_auth_from_request(&mut req)?;
+    server.post("/game/config", |config: GameConfig, _, ctx| {
+        check_admin_auth(ctx)?;
         let client = AppClient::get();
         client.update_game_config(config)?;
         Ok(Response::ok())
     });
 
-    server.get("/game/config", |_| {
+    server.get("/game/config", |_, _| {
         let client = AppClient::get();
         let config = client.get_game_config()?;
         Ok(Json::new(&config)?.into())
@@ -52,7 +52,7 @@ pub fn routes(server: &mut HttpServer) {
         wifi_config: WifiConfig,
     }
 
-    server.post("/app/config", |body: ConfigureRequest, _| {
+    server.post("/app/config", |body: ConfigureRequest, _, _| {
         let client = AppClient::get();
         client.setup_wifi(body.wifi_config)?;
         Ok(Response::ok())
@@ -63,13 +63,13 @@ pub fn routes(server: &mut HttpServer) {
         wifi_config: Option<WifiConfig>,
     }
 
-    server.get("/app/config", |_| {
+    server.get("/app/config", |_, _| {
         let client = AppClient::get();
         let wifi_config = client.get_wifi_config()?;
         Ok(Json::new(&GetAppConfigRequest { wifi_config })?.into())
     });
 
-    server.get("/app/status", |_| {
+    server.get("/app/status", |_, _| {
         let client = AppClient::get();
         let app_status = client.get_app_state()?;
         Ok(Json::new(&app_status)?.into())
@@ -85,8 +85,8 @@ pub fn routes(server: &mut HttpServer) {
         nonce: String,
     }
 
-    server.post("/auth/challenge", |body: AuthChallengeRequest, _| {
-        let user_manager = UserManager::get();
+    server.post("/auth/challenge", |body: AuthChallengeRequest, _, _| {
+        let user_manager = user_manager();
         let nonce = user_manager
             .generate_nonce(body.username)
             .ok_or_else(|| anyhow::anyhow!("Falha ao gerar nonce"))?;
@@ -104,20 +104,47 @@ pub fn routes(server: &mut HttpServer) {
         token: String,
     }
 
-    server.post("/auth/login", |body: LoginRequest, req| {
-        let ip = req
-            .connection()
-            .raw_connection()?
-            .source_ipv4()?
-            .to_string();
-        let mut user_manager = UserManager::get();
+    server.post("/auth/login", |body: LoginRequest, _, ctx| {
+        let ip = ctx
+            .client_ip
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Falha ao gerar token"))?;
+        log::info!("auth login for ip={}", ip);
+        let user_manager = user_manager();
         let token = user_manager
             .generate_token(body.username, body.password, ip)
-            .ok_or_else(|| anyhow::anyhow!("Falha ao gerar token"))?;
-        Ok(Json::new(&LoginResponse {
-            token: token.into(),
-        })?
-        .into())
+            .map_err(|e| {
+                log::warn!("auth login failed: {}", e);
+                anyhow::anyhow!("Falha ao gerar token")
+            })?;
+        let token_str = token.into_string();
+        log::info!("auth login ok, token_len={}", token_str.len());
+        Ok(Json::new(&LoginResponse { token: token_str })?.into())
+    });
+
+    server.get("/bt/sinks", |_, ctx| {
+        check_admin_auth(ctx)?;
+        Ok(Json::new(&bt::list_sinks()?)? .into())
+    });
+
+    server.post("/bt/scan", |_: EmptyRequest, _, ctx| {
+        check_admin_auth(ctx)?;
+        Ok(Json::new(&bt::scan_sinks()?)? .into())
+    });
+
+    #[derive(Debug, Clone, Deserialize)]
+    struct PairSinkRequest {
+        address: String,
+    }
+
+    server.post("/bt/pair", |body: PairSinkRequest, _, ctx| {
+        check_admin_auth(ctx)?;
+        Ok(Json::new(&bt::pair_sink(&body.address)?)? .into())
+    });
+
+    server.post("/bt/unpair", |_: EmptyRequest, _, ctx| {
+        check_admin_auth(ctx)?;
+        Ok(Json::new(&bt::unpair_sink()?)? .into())
     });
 }
 
@@ -126,7 +153,7 @@ pub fn load_web(server: &mut HttpServer) {
 
     if let Some(index) = web_build.get_file("index.html") {
         let contents = index.contents();
-        server.get("/", move |_| {
+        server.get("/", move |_, _| {
             Ok(Response {
                 status_code: 200,
                 content_type: ContentType::Html,
@@ -137,7 +164,6 @@ pub fn load_web(server: &mut HttpServer) {
 
     fn register_dir(dir: &Dir<'static>, server: &mut HttpServer) {
         for file in dir.files() {
-            // The file path relative to the root of `dist/`
             let route = format!("/{}", file.path().display());
 
             let contents = file.contents();
@@ -150,7 +176,7 @@ pub fn load_web(server: &mut HttpServer) {
 
             let contents = contents;
 
-            server.get(route, move |_| {
+            server.get(route, move |_, _| {
                 Ok(Response {
                     status_code: 200,
                     content_type: content_type,
