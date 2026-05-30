@@ -68,9 +68,8 @@ pub unsafe fn softap_peer_ipv4_from_dhcp() -> Option<Ipv4Addr> {
     }
     if count != 1 {
         log::warn!(
-            "softap dhcp ip fallback skipped: {count} stations connected (need exactly 1)"
+            "softap dhcp ip fallback: {count} stations connected, using first station"
         );
-        return None;
     }
 
     let mut pair = esp_netif_pair_mac_ip_t {

@@ -94,6 +94,18 @@ pub fn start_scan() -> Result<()> {
     Ok(())
 }
 
+fn is_scanning() -> Result<bool> {
+    Ok(cache().read().map_err(|e| anyhow!("{e}"))?.scanning)
+}
+
+/// Read coprocessor link state into the cache (skipped while a scan owns the UART).
+pub fn refresh_status_if_idle() -> Result<()> {
+    if is_scanning()? {
+        return Ok(());
+    }
+    refresh_status()
+}
+
 pub fn list_sinks_cached() -> Result<BtSinksResponse> {
     let c = cache().read().map_err(|e| anyhow!("{e}"))?;
     Ok(BtSinksResponse {
@@ -102,6 +114,14 @@ pub fn list_sinks_cached() -> Result<BtSinksResponse> {
         scanning: c.scanning,
         connected: c.connected,
     })
+}
+
+/// Cached sinks plus a live `GetStatus` from the coprocessor when not scanning.
+pub fn list_sinks_live() -> Result<BtSinksResponse> {
+    if let Err(e) = refresh_status_if_idle() {
+        log::warn!("BT status refresh failed: {e:#}");
+    }
+    list_sinks_cached()
 }
 
 pub fn pair_sink_dispatch(address: &str) -> Result<BtSinksResponse> {
@@ -129,20 +149,18 @@ pub fn pair_sink_dispatch(address: &str) -> Result<BtSinksResponse> {
         name,
         reply: tx,
     })?;
-    rx.recv_timeout(Duration::from_secs(45))
+    rx.recv_timeout(Duration::from_secs(60))
         .map_err(|_| anyhow!("connect timeout"))??;
 
-    refresh_status()?;
     list_sinks_cached()
 }
 
 pub fn unpair_sink_dispatch() -> Result<BtSinksResponse> {
     let (tx, rx) = mpsc::channel();
     dispatcher_tx()?.send(DispatcherCmd::Disconnect { reply: tx })?;
-    rx.recv_timeout(Duration::from_secs(10))
+    rx.recv_timeout(Duration::from_secs(20))
         .map_err(|_| anyhow!("disconnect timeout"))??;
 
-    refresh_status()?;
     list_sinks_cached()
 }
 
@@ -198,6 +216,11 @@ fn dispatcher_loop(rx: Receiver<DispatcherCmd>, mut uart: UartDriver<'static>) {
                         log::info!("BT scan done: {} device(s)", {
                             cache().read().map(|c| c.discovered.len()).unwrap_or(0)
                         });
+                        if let Err(e) =
+                            refresh_status_from_loop(&mut uart, &mut seq, &mut acc, &mut read_buf)
+                        {
+                            log::warn!("post-scan status refresh failed: {e:#}");
+                        }
                     }
                     Err(e) => {
                         log::error!("BT scan failed: {e:#}");
@@ -259,6 +282,11 @@ fn dispatcher_loop(rx: Receiver<DispatcherCmd>, mut uart: UartDriver<'static>) {
                     latest_sound,
                 ) {
                     log::error!("play sound {latest_sound} id={latest_id} failed: {e:#}");
+                    if let Err(refresh_err) =
+                        refresh_status_from_loop(&mut uart, &mut seq, &mut acc, &mut read_buf)
+                    {
+                        log::warn!("post-play status refresh failed: {refresh_err:#}");
+                    }
                 }
             }
         }
@@ -371,7 +399,7 @@ fn do_connect(
         Opcode::Connect,
         &Request::Connect { addr, name },
     )?;
-    let timeout = Duration::from_secs(45);
+    let timeout = Duration::from_secs(60);
     match read_response(uart, acc, read_buf, Opcode::Connect, s, timeout)? {
         Response::Ok => Ok(()),
         Response::Error { code } => Err(anyhow!("connect: {:?}", code)),

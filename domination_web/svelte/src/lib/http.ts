@@ -1,4 +1,4 @@
-import { getValidToken, clearSession } from "./auth";
+import { getValidToken, clearSession, invalidateStoredToken } from "./auth";
 import { notifySessionExpired } from "./session";
 
 /** mDNS hostname when the device is already on your LAN (STA mode). */
@@ -135,33 +135,38 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Authorization: token };
 }
 
+async function withAuthRetry<R>(
+  request: (headers: Record<string, string>) => Promise<R>
+): Promise<R> {
+  try {
+    return await request(await authHeaders());
+  } catch (e) {
+    if (!(e instanceof UnauthorizedError)) {
+      throw e;
+    }
+    invalidateStoredToken();
+    try {
+      return await request(await authHeaders());
+    } catch (retryErr) {
+      if (retryErr instanceof UnauthorizedError) {
+        handleAuthorizedUnauthorized();
+      }
+      throw retryErr;
+    }
+  }
+}
+
 export async function authorizedPost<R>(
   route: string,
   body?: unknown,
   baseUrl?: string
 ): Promise<R> {
-  try {
-    const headers = await authHeaders();
-    return await post<R>(route, body, headers, baseUrl);
-  } catch (e) {
-    if (e instanceof UnauthorizedError) {
-      handleAuthorizedUnauthorized();
-    }
-    throw e;
-  }
+  return withAuthRetry((headers) => post<R>(route, body, headers, baseUrl));
 }
 
 export async function authorizedGet<R>(
   route: string,
   baseUrl?: string
 ): Promise<R> {
-  try {
-    const headers = await authHeaders();
-    return await get<R>(route, headers, baseUrl);
-  } catch (e) {
-    if (e instanceof UnauthorizedError) {
-      handleAuthorizedUnauthorized();
-    }
-    throw e;
-  }
+  return withAuthRetry((headers) => get<R>(route, headers, baseUrl));
 }

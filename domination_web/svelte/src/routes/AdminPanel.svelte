@@ -7,8 +7,8 @@
   import UiCardButton from "../components/UiCardButton.svelte";
   import {
     clearSession,
-    isLoggedIn,
     loginAndStore,
+    verifyServerSession,
   } from "../lib/auth";
   import {
     listSinks,
@@ -123,7 +123,7 @@
   onMount(async () => {
     setSessionExpiredHandler(handleSessionExpired);
 
-    if (isLoggedIn()) {
+    if (await verifyServerSession()) {
       authenticated = true;
       try {
         await loadState();
@@ -177,23 +177,9 @@
     btLoading = true;
     scanAbort = false;
     try {
+      toast.notify("Buscando dispositivos…", "info");
       btState = await scanSinks();
-      if (btState.scanning) {
-        toast.notify("Buscando dispositivos…", "info");
-        const deadline = Date.now() + 20_000;
-        while (!scanAbort && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 1500));
-          if (scanAbort || adminView !== "bluetooth") return;
-          btState = await listSinks();
-          if (!btState.scanning) {
-            toast.notify("Busca concluída", "info");
-            return;
-          }
-        }
-        if (!scanAbort) {
-          toast.notify("Busca demorou demais", "error");
-        }
-      } else {
+      if (!scanAbort) {
         toast.notify("Busca concluída", "info");
       }
     } catch (e) {

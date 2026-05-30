@@ -1,5 +1,5 @@
 import { login } from "./api";
-import { decodeToken, shouldRefresh, type Token } from "./token";
+import { decodeToken, isTokenExpired, type Token } from "./token";
 
 const CREDS_KEY = "domination_admin_creds";
 const TOKEN_KEY = "domination_admin_token";
@@ -41,13 +41,34 @@ function clearTokenRaw(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/** Drop cached token so the next request performs a fresh login. */
+export function invalidateStoredToken(): void {
+  clearTokenRaw();
+}
+
 export function clearSession(): void {
   clearCreds();
   clearTokenRaw();
 }
 
+/** True when saved credentials exist (does not verify server session). */
 export function isLoggedIn(): boolean {
   return loadCreds() !== null;
+}
+
+/** Validates token with the device (refreshes if needed). Clears session on failure. */
+export async function verifyServerSession(): Promise<boolean> {
+  if (!loadCreds()) {
+    return false;
+  }
+  try {
+    const { authorizedGet } = await import("./http");
+    await authorizedGet<{ ok: boolean }>("/auth/session");
+    return true;
+  } catch {
+    clearSession();
+    return false;
+  }
 }
 
 export function getStoredToken(): Token | null {
@@ -67,7 +88,7 @@ export async function getValidToken(): Promise<string> {
   }
 
   const stored = getStoredToken();
-  if (stored && !shouldRefresh(stored)) {
+  if (stored && !isTokenExpired(stored)) {
     return stored.raw;
   }
 

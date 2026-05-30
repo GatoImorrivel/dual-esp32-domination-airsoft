@@ -52,23 +52,31 @@ describe("bt API client", () => {
     });
   });
 
-  it("scanSinks calls POST /bt/scan", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: { get: () => "application/json" },
-      text: async () =>
-        JSON.stringify({
+  it("scanSinks POSTs /bt/scan then polls GET /bt/sinks", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ scanning: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
           paired: null,
           discovered: [{ address: "AA:BB:CC:DD:EE:FF", name: "Test" }],
+          scanning: false,
         }),
-    });
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     const { scanSinks } = await import("./bt");
     const res = await scanSinks();
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("/bt/scan");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/bt/sinks");
     expect(res.discovered).toHaveLength(1);
   });
 });

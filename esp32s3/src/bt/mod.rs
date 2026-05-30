@@ -16,7 +16,8 @@
 //!
 //! 1. Flash **both** `esp32s3` and `esp32` (Classic BT + A2DP sdkconfig on the coprocessor).
 //! 2. Confirm cross-wiring above; boot log should show coprocessor reachability (see `check_coprocessor`).
-//! 3. `POST /bt/scan` sets `scanning: true`; poll `GET /bt/sinks` until `scanning` is false (~10s).
+//! 3. `POST /bt/scan` starts scan (`scanning: true`); poll `GET /bt/sinks` until `scanning` is false (~10s).
+//!    While not scanning, each `GET /bt/sinks` refreshes link state from the coprocessor (`GetStatus`).
 
 #[cfg(not(test))]
 mod dispatcher;
@@ -55,14 +56,14 @@ pub fn check_coprocessor() -> anyhow::Result<()> {
 
 #[cfg(not(test))]
 pub fn list_sinks() -> anyhow::Result<BtSinksResponse> {
-    dispatcher::refresh_status()?;
-    dispatcher::list_sinks_cached()
+    dispatcher::list_sinks_live()
 }
 
+/// Start coprocessor scan; returns immediately with cached state (`scanning: true`).
 #[cfg(not(test))]
-pub fn scan_sinks() -> anyhow::Result<BtSinksResponse> {
+pub fn start_scan() -> anyhow::Result<BtSinksResponse> {
     dispatcher::start_scan()?;
-    dispatcher::list_sinks_cached()
+    dispatcher::list_sinks_live()
 }
 
 #[cfg(not(test))]
@@ -86,6 +87,18 @@ pub use mock::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_scan_returns_scanning_then_list_completes() {
+        mock::reset();
+        let started = mock::start_scan().unwrap();
+        assert!(started.scanning);
+        assert!(started.discovered.is_empty());
+
+        let done = list_sinks().unwrap();
+        assert!(!done.scanning);
+        assert_eq!(done.discovered.len(), 4);
+    }
 
     #[test]
     fn scan_populates_discovered() {

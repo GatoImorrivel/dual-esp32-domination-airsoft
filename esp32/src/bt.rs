@@ -17,8 +17,9 @@ use esp_idf_svc::{
     },
     hal::{modem::BluetoothModemPeripheral, peripheral::Peripheral},
     sys::{
-        esp_a2d_media_ctrl, esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_START, vRingbufferReturnItem,
-        xRingbufferCreate, xRingbufferReceiveUpTo, xRingbufferSend, RingbufHandle_t,
+        esp_a2d_media_ctrl, esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_START,
+        esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_STOP, vRingbufferReturnItem, xRingbufferCreate,
+        xRingbufferReceiveUpTo, xRingbufferSend, RingbufHandle_t,
         RingbufferType_t_RINGBUF_TYPE_BYTEBUF,
     },
 };
@@ -250,7 +251,80 @@ impl BluetoothAudio {
         Ok(())
     }
 
+    fn wait_until_disconnected(&self, timeout_ms: u32) {
+        let mut waited = 0u32;
+        while self.connected.load(Ordering::SeqCst) && waited < timeout_ms {
+            FreeRtos::delay_ms(50);
+            waited += 50;
+        }
+        if self.connected.load(Ordering::SeqCst) {
+            log::warn!(
+                "A2DP disconnect wait timed out after {timeout_ms}ms; clearing local state"
+            );
+            self.connected.store(false, Ordering::SeqCst);
+            *self.connected_addr.write().unwrap() = None;
+        }
+    }
+
+    fn wait_until_connected(&self, target: &BdAddr, timeout_ms: u32) -> Result<()> {
+        let target_bytes = target.addr();
+        let mut waited = 0u32;
+        while waited < timeout_ms {
+            if self.connected.load(Ordering::SeqCst)
+                && self
+                    .connected_addr
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|a| a.addr() == target_bytes)
+            {
+                return Ok(());
+            }
+            FreeRtos::delay_ms(100);
+            waited += 100;
+        }
+        anyhow::bail!("A2DP connect to {target} timed out after {timeout_ms}ms");
+    }
+
+    /// Disconnect any existing link, then connect and wait until the target is up.
+    pub fn connect_to_device(&self, target: &BdAddr) -> Result<()> {
+        let target_bytes = target.addr();
+        let connected = self.connected.load(Ordering::SeqCst);
+        let conn_addr = self.connected_addr.read().unwrap().clone();
+        let paired_addr = self.paired.read().unwrap().as_ref().map(|d| d.addr);
+
+        if connected && conn_addr.as_ref().is_some_and(|a| a.addr() == target_bytes) {
+            return Ok(());
+        }
+
+        let needs_teardown = connected
+            || conn_addr.is_some()
+            || paired_addr.is_some_and(|a| a != target_bytes);
+
+        if needs_teardown {
+            self.a2dp_disconnect()?;
+            self.wait_until_disconnected(8000);
+            FreeRtos::delay_ms(1000);
+        }
+
+        self.a2dp_connect(target)?;
+        self.wait_until_connected(target, 25_000)?;
+        Ok(())
+    }
+
     pub fn a2dp_disconnect(&self) -> Result<()> {
+        self.stop_playback();
+
+        // Bluedroid may call the source data callback with invalid buf during stop/flush.
+        self.a2dp.clear_source_data_callback()?;
+
+        if self.connected.load(Ordering::SeqCst) {
+            unsafe {
+                esp_a2d_media_ctrl(esp_a2d_media_ctrl_t_ESP_A2D_MEDIA_CTRL_STOP);
+            }
+            FreeRtos::delay_ms(300);
+        }
+
         let addr = self
             .connected_addr
             .read()
@@ -264,10 +338,12 @@ impl BluetoothAudio {
             });
         if let Some(addr) = addr {
             self.a2dp.disconnect_source(&addr)?;
+            FreeRtos::delay_ms(150);
         }
         self.connected.store(false, Ordering::SeqCst);
         *self.connected_addr.write().unwrap() = None;
-        self.stop_playback();
+
+        self.a2dp.restore_source_data_callback()?;
         Ok(())
     }
 

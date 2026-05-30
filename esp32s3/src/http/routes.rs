@@ -118,19 +118,32 @@ pub fn routes(server: &mut HttpServer) {
         token: String,
     }
 
-    server.post("/auth/login", |body: LoginRequest, _, ctx| {
+    server.post("/auth/login", |body: LoginRequest, req, ctx| {
+        use crate::middleware::auth::client_ipv4;
+
         let ip = ctx
             .client_ip
             .clone()
+            .or_else(|| client_ipv4(req).ok())
             .ok_or_else(|| anyhow::anyhow!("Falha ao gerar token"))?;
         let user_manager = user_manager();
         let token = user_manager
-            .generate_token(body.username, body.password, ip)
+            .generate_token(body.username, body.password, &ip)
             .map_err(|_| anyhow::anyhow!("Falha ao gerar token"))?;
         Ok(Json::new(&LoginResponse {
             token: token.into_string(),
         })?
         .into())
+    });
+
+    #[derive(Debug, Clone, Serialize)]
+    struct AuthSessionResponse {
+        ok: bool,
+    }
+
+    server.get("/auth/session", |_, ctx| {
+        check_admin_auth(ctx)?;
+        Ok(Json::new(&AuthSessionResponse { ok: true })?.into())
     });
 
     // Bluetooth admin API: delegates to `crate::bt` (UART dispatcher → ESP32 coprocessor).
@@ -143,7 +156,9 @@ pub fn routes(server: &mut HttpServer) {
 
     server.post("/bt/scan", |_: EmptyRequest, _, ctx| {
         check_admin_auth(ctx)?;
-        Ok(Json::new(&bt::scan_sinks()?)? .into())
+        bt::start_scan()
+            .map_err(|e| anyhow::anyhow!("BT scan start failed: {e:#}"))?;
+        Ok(Json::new(&serde_json::json!({ "scanning": true }))?.into())
     });
 
     #[derive(Debug, Clone, Deserialize)]

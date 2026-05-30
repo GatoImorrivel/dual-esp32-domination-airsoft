@@ -52,7 +52,8 @@ fn mock_discovered_devices() -> Vec<AudioSink> {
 }
 
 pub fn list_sinks() -> anyhow::Result<BtSinksResponse> {
-    let guard = state().read().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut guard = state().write().map_err(|e| anyhow::anyhow!("{e}"))?;
+    finish_scan_if_needed(&mut guard);
     Ok(BtSinksResponse {
         paired: guard.paired.clone(),
         discovered: guard.discovered.clone(),
@@ -61,14 +62,33 @@ pub fn list_sinks() -> anyhow::Result<BtSinksResponse> {
     })
 }
 
-pub fn scan_sinks() -> anyhow::Result<BtSinksResponse> {
+pub fn start_scan() -> anyhow::Result<BtSinksResponse> {
     let mut guard = state().write().map_err(|e| anyhow::anyhow!("{e}"))?;
-    guard.discovered = mock_discovered_devices();
-    guard.scanning = false;
+    guard.scanning = true;
     Ok(BtSinksResponse {
         paired: guard.paired.clone(),
         discovered: guard.discovered.clone(),
-        scanning: false,
+        scanning: true,
+        connected: guard.connected,
+    })
+}
+
+/// Completes an in-progress mock scan (simulates coprocessor finishing).
+fn finish_scan_if_needed(guard: &mut MockBtState) {
+    if guard.scanning {
+        guard.discovered = mock_discovered_devices();
+        guard.scanning = false;
+    }
+}
+
+pub fn scan_sinks() -> anyhow::Result<BtSinksResponse> {
+    start_scan()?;
+    let mut guard = state().write().map_err(|e| anyhow::anyhow!("{e}"))?;
+    finish_scan_if_needed(&mut guard);
+    Ok(BtSinksResponse {
+        paired: guard.paired.clone(),
+        discovered: guard.discovered.clone(),
+        scanning: guard.scanning,
         connected: guard.connected,
     })
 }

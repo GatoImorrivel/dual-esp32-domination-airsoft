@@ -45,3 +45,6 @@ sdkconfig_defaults = ["sdkconfig.defaults"]
 
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }
+
+[patch.crates-io]
+esp-idf-svc = { path = "vendor/esp-idf-svc" }

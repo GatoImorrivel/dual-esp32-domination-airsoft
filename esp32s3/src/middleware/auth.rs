@@ -59,11 +59,23 @@ fn usable_ipv4(ip: Ipv4Addr) -> Option<Ipv4Addr> {
     }
 }
 
-/// ESP-IDF httpd sockets are often IPv6; read peer with `sockaddr_in6` then extract IPv4.
+/// Peer IPv4 from the httpd socket (try `sockaddr_in` first, then IPv6/mapped layouts).
 unsafe fn peer_ipv4_from_httpd(req: *mut httpd_req_t) -> Option<Ipv4Addr> {
     let sockfd = httpd_req_to_sockfd(req);
     if sockfd == -1 {
         return None;
+    }
+
+    let mut addr4: sockaddr_in = mem::zeroed();
+    let mut addrlen4 = mem::size_of::<sockaddr_in>() as u32;
+    if lwip_getpeername(
+        sockfd,
+        &mut addr4 as *mut _ as *mut _,
+        &mut addrlen4 as *mut _,
+    ) == 0
+        && addr4.sin_family == AF_INET as u8
+    {
+        return usable_ipv4(Ipv4Addr::from(u32::from_be(addr4.sin_addr.s_addr)));
     }
 
     let mut addr: sockaddr_in6 = mem::zeroed();
@@ -98,6 +110,13 @@ unsafe fn peer_ipv4_from_httpd(req: *mut httpd_req_t) -> Option<Ipv4Addr> {
 pub fn client_ipv4(
     req: &mut Request<&mut esp_idf_svc::http::server::EspHttpConnection>,
 ) -> anyhow::Result<String> {
+    // On SoftAP, DHCP lease IP is stable across requests; getpeername can differ per socket.
+    if network::is_softap_topology() {
+        if let Some(ip) = unsafe { network::softap_peer_ipv4_from_dhcp() } {
+            return Ok(ip.to_string());
+        }
+    }
+
     let raw = req
         .connection()
         .raw_connection()

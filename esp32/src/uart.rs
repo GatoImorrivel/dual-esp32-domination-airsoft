@@ -190,7 +190,7 @@ fn handle_frame(
         (Opcode::Connect, Request::Connect { addr, name }) => {
             *busy = true;
             let bd = BdAddr::from_bytes(addr);
-            let resp = match bt.a2dp_connect(&bd) {
+            let resp = match bt.connect_to_device(&bd) {
                 Ok(()) => {
                     let device = BtDevice { name, addr };
                     match bt.set_paired_device(Some(device)) {
@@ -204,7 +204,8 @@ fn handle_frame(
                     }
                 }
                 Err(e) => {
-                    log::warn!("a2dp_connect failed: {e:#}");
+                    log::warn!("connect_to_device failed: {e:#}");
+                    let _ = bt.a2dp_disconnect();
                     Response::Error {
                         code: ErrorCode::ConnectFailed,
                     }
@@ -215,10 +216,16 @@ fn handle_frame(
         }
 
         (Opcode::Disconnect, Request::Disconnect) => {
-            let _ = bt.a2dp_disconnect();
-            let _ = bt.set_paired_device(None);
             *pending_play = None;
             bt.stop_playback();
+            let disc = bt.a2dp_disconnect();
+            let clear = bt.set_paired_device(None);
+            if let Err(e) = disc {
+                log::warn!("a2dp_disconnect: {e:#}");
+            }
+            if let Err(e) = clear {
+                log::warn!("set_paired_device(None): {e:#}");
+            }
             Response::Ok
         }
 
