@@ -5,7 +5,7 @@
 
 <div class="container">
   {#each $toast as t (t.id)}
-    <div class="toast {t.type}" in:fly={{ y: -20, duration: 200 }} out:fade>
+    <div class="toast {t.type}" in:fly={{ y: 20, duration: 200 }} out:fade>
       <span>{t.message}</span>
       <button type="button" on:click={() => toast.remove(t.id)}>✕</button>
     </div>
@@ -15,11 +15,11 @@
 <style>
   .container {
     position: fixed;
-    top: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
     left: 0;
     right: 0;
     display: flex;
-    flex-direction: column;
+    flex-direction: column-reverse;
     gap: 12px;
     align-items: center;
     z-index: 9999;

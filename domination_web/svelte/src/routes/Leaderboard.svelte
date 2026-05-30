@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import ThemeToggle from "../components/ThemeToggle.svelte";
   import UiIconButton from "../components/UiIconButton.svelte";
+  import { durationToMs, formatDurationRange } from "../lib/duration";
   import { get } from "../lib/http";
   import { navigate } from "../lib/router";
   import { toast } from "../lib/toast";
@@ -19,15 +20,6 @@
 
   let progress: MatchProgress | null = null;
   let config: GameConfig | null = null;
-
-  function durationToMs(d: Duration | null | undefined): number {
-    if (!d) return 0;
-    return d.secs * 1000 + d.nanos / 1_000_000;
-  }
-
-  function secs(ms: number): number {
-    return Math.floor(ms / 1000);
-  }
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let polling = false;
@@ -126,7 +118,7 @@
         <div class="team">
           <div class="team-header">
             <span class="team-name">Vermelho</span>
-            <strong>{secs(redMs)}s / {secs(redTarget)}s</strong>
+            <strong>{formatDurationRange(redMs, redTarget)}</strong>
           </div>
           <div class="progress">
             <div class="bar red" style="width: {redPercent}%"></div>
@@ -136,7 +128,7 @@
         <div class="team">
           <div class="team-header">
             <span class="team-name">Azul</span>
-            <strong>{secs(blueMs)}s / {secs(blueTarget)}s</strong>
+            <strong>{formatDurationRange(blueMs, blueTarget)}</strong>
           </div>
           <div class="progress">
             <div class="bar blue" style="width: {bluePercent}%"></div>

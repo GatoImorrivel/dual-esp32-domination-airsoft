@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onLinkEnabled, syncTeamTimes, type TimeField } from "../lib/linkedTimes";
+  import DurationWheelPicker from "./DurationWheelPicker.svelte";
+  import { onLinkEnabled, syncTeamTimes } from "../lib/linkedTimes";
 
   export let redSecs: number;
   export let blueSecs: number;
@@ -14,18 +15,14 @@
     timesLinked = !timesLinked;
   }
 
-  function onRedInput(event: Event) {
-    const value = parseInt((event.currentTarget as HTMLInputElement).value, 10);
-    if (isNaN(value)) return;
-    const next = syncTeamTimes(timesLinked, "red", redSecs, blueSecs, value);
+  function onRedChange(event: CustomEvent<number>) {
+    const next = syncTeamTimes(timesLinked, "red", redSecs, blueSecs, event.detail);
     redSecs = next.redSecs;
     blueSecs = next.blueSecs;
   }
 
-  function onBlueInput(event: Event) {
-    const value = parseInt((event.currentTarget as HTMLInputElement).value, 10);
-    if (isNaN(value)) return;
-    const next = syncTeamTimes(timesLinked, "blue", redSecs, blueSecs, value);
+  function onBlueChange(event: CustomEvent<number>) {
+    const next = syncTeamTimes(timesLinked, "blue", redSecs, blueSecs, event.detail);
     redSecs = next.redSecs;
     blueSecs = next.blueSecs;
   }
@@ -33,7 +30,7 @@
 
 <div class="linked-times">
   <div class="header">
-    <h3>Tempo para dominar (segundos)</h3>
+    <h3>Tempo para dominar</h3>
     <button
       type="button"
       class="link-toggle"
@@ -64,25 +61,17 @@
   </div>
 
   <div class="form">
-    <label>
-      Vermelho
-      <input
-        type="number"
-        min="1"
-        value={redSecs}
-        on:input={onRedInput}
-      />
-    </label>
-    <label>
-      Azul
-      <input
-        type="number"
-        min="1"
-        value={blueSecs}
-        on:input={onBlueInput}
-        disabled={timesLinked}
-      />
-    </label>
+    <DurationWheelPicker
+      bind:secs={redSecs}
+      label="Vermelho"
+      on:change={onRedChange}
+    />
+    <DurationWheelPicker
+      bind:secs={blueSecs}
+      label="Azul"
+      disabled={timesLinked}
+      on:change={onBlueChange}
+    />
   </div>
 </div>
 
@@ -130,27 +119,6 @@
 
   .form {
     display: grid;
-    gap: 12px;
-  }
-
-  label {
-    display: grid;
-    gap: 6px;
-    font-size: 0.9rem;
-    color: var(--color-fg);
-  }
-
-  input {
-    padding: 10px;
-    border-radius: 8px;
-    border: 1px solid var(--color-border);
-    background: var(--color-bg);
-    color: var(--color-fg);
-    font-size: 1rem;
-  }
-
-  input:disabled {
-    opacity: 0.55;
-    background: var(--color-surface);
+    gap: 16px;
   }
 </style>
