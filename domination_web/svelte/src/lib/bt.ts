@@ -9,6 +9,7 @@ export interface BtSinksResponse {
   paired: AudioSink | null;
   discovered: AudioSink[];
   scanning?: boolean;
+  connected?: boolean;
 }
 
 export function listSinks(): Promise<BtSinksResponse> {

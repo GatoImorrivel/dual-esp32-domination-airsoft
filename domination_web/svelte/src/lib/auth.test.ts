@@ -81,6 +81,29 @@ describe("auth session", () => {
     expect(storage.get("domination_admin_token")).toBeTruthy();
   });
 
+  it("loginAndStore does not save creds when login fails", async () => {
+    const fetchMock = vi.fn((url: string | URL) => {
+      const href = String(url);
+      if (href.includes("/auth/challenge")) {
+        return Promise.resolve(jsonResponse({ nonce: "n" }));
+      }
+      if (href.includes("/auth/login")) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          headers: { get: () => "text/plain" },
+          text: async () => "unauthorized",
+        });
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${href}`));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(loginAndStore("root", "wrong")).rejects.toThrow();
+    expect(loadCreds()).toBeNull();
+    expect(storage.get("domination_admin_token")).toBeFalsy();
+  });
+
   it("getValidToken refreshes when near expiry", async () => {
     saveCreds({ username: "root", password: "1234" });
     const nearExpiry = Math.floor(Date.now() / 1000) + 10;

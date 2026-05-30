@@ -29,9 +29,14 @@
   </UiButton>
 
   {#if btState?.paired}
-    <div class="paired-banner">
+    <div class="paired-banner" class:disconnected={btState.connected === false}>
       <span>Emparelhado:</span>
       <strong>{displayName(btState.paired)}</strong>
+      {#if btState.connected === false}
+        <span class="link-warn">Sem conexão de áudio</span>
+      {:else if btState.connected === true}
+        <span class="link-ok">Conectado</span>
+      {/if}
       <UiButton
         variant="secondary"
         small
@@ -55,7 +60,9 @@
             <span class="mac">{sink.address}</span>
           </div>
           {#if isPaired(sink)}
-            <span class="tag">Ativo</span>
+            <span class="tag" class:tag-off={btState?.connected === false}>
+              {btState?.connected === false ? "Desconectado" : "Ativo"}
+            </span>
           {:else}
             <UiButton
               variant="secondary"
@@ -113,6 +120,26 @@
 
   .paired-banner :global(.ui-btn) {
     margin-left: auto;
+  }
+
+  .paired-banner.disconnected {
+    border-color: color-mix(in srgb, var(--color-fg) 30%, transparent);
+  }
+
+  .link-warn {
+    font-size: 0.8rem;
+    color: #c45c26;
+    font-weight: 600;
+  }
+
+  .link-ok {
+    font-size: 0.8rem;
+    color: #2a7a3b;
+    font-weight: 600;
+  }
+
+  .tag-off {
+    opacity: 0.85;
   }
 
   .empty {

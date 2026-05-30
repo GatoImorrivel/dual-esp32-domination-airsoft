@@ -14,6 +14,8 @@ harness = false  # do not use the built-in cargo test harness -> resolve rust-an
 default = []
 
 experimental = ["esp-idf-svc/experimental"]
+# Bench: auto-connect STA on boot instead of setup AP.
+dev-wifi = []
 
 [dependencies]
 log = "0.4"

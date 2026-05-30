@@ -2,9 +2,6 @@
 //!
 //! Wiring: S3 UART1 TX=GPIO4, RX=GPIO5 ↔ ESP32 UART2 TX=GPIO17, RX=GPIO16, common GND.
 //! Baud: [`domination_uart::BAUD_RATE`] (921600). PCM: S16LE stereo 44.1 kHz (ESP32 `bt.rs`).
-//!
-//! If HTTP scan returns an empty `discovered` list, verify both boards are flashed, wiring
-//! matches the table in `bt/mod.rs`, and serial logs show `BT scan done: N device(s)`.
 
 use esp_idf_svc::hal::uart::UartDriver as _;
 use esp_idf_svc::io::Write;
@@ -18,7 +15,7 @@ use domination_uart::{
     codec::{decode_frames, encode_frame},
     format_mac, parse_mac,
     protocol::{Opcode, Request, Response},
-    BtDevice, BAUD_RATE,
+    BtDevice, MAX_RX_ACCUM,
 };
 use esp_idf_svc::hal::uart::UartDriver;
 use postcard;
@@ -33,6 +30,7 @@ struct Cache {
     paired: Option<AudioSink>,
     discovered: Vec<AudioSink>,
     scanning: bool,
+    connected: bool,
 }
 
 static CACHE: OnceLock<RwLock<Cache>> = OnceLock::new();
@@ -43,6 +41,7 @@ fn cache() -> &'static RwLock<Cache> {
             paired: None,
             discovered: vec![],
             scanning: false,
+            connected: false,
         })
     })
 }
@@ -73,7 +72,7 @@ pub fn init(uart: UartDriver<'static>) -> Result<()> {
     DISPATCHER_TX
         .set(tx)
         .map_err(|_| anyhow!("dispatcher already init"))?;
-  let _ = cache();
+    let _ = cache();
     Ok(())
 }
 
@@ -101,20 +100,28 @@ pub fn list_sinks_cached() -> Result<BtSinksResponse> {
         paired: c.paired.clone(),
         discovered: c.discovered.clone(),
         scanning: c.scanning,
+        connected: c.connected,
     })
 }
 
 pub fn pair_sink_dispatch(address: &str) -> Result<BtSinksResponse> {
+    {
+        let c = cache().read().map_err(|e| anyhow!("{e}"))?;
+        if c.scanning {
+            return Err(anyhow!(
+                "Bluetooth scan in progress; wait for scan to finish before pairing"
+            ));
+        }
+    }
+
     let addr = parse_mac(address)?;
     let name = cache()
         .read()
-        .ok()
-        .and_then(|c| {
-            c.discovered
-                .iter()
-                .find(|s| s.address.eq_ignore_ascii_case(address))
-                .and_then(|s| s.name.clone())
-        });
+        .map_err(|e| anyhow!("{e}"))?
+        .discovered
+        .iter()
+        .find(|s| s.address.eq_ignore_ascii_case(address))
+        .and_then(|s| s.name.clone());
 
     let (tx, rx) = mpsc::channel();
     dispatcher_tx()?.send(DispatcherCmd::Connect {
@@ -135,13 +142,8 @@ pub fn unpair_sink_dispatch() -> Result<BtSinksResponse> {
     rx.recv_timeout(Duration::from_secs(10))
         .map_err(|_| anyhow!("disconnect timeout"))??;
 
-    let mut c = cache().write().map_err(|e| anyhow!("{e}"))?;
-    c.paired = None;
-    Ok(BtSinksResponse {
-        paired: None,
-        discovered: c.discovered.clone(),
-        scanning: c.scanning,
-    })
+    refresh_status()?;
+    list_sinks_cached()
 }
 
 pub fn request_play_sound(sound_id: u8) -> Result<u32> {
@@ -154,9 +156,10 @@ pub fn request_play_sound(sound_id: u8) -> Result<u32> {
 pub(crate) fn refresh_status() -> Result<()> {
     let (tx, rx) = mpsc::channel();
     dispatcher_tx()?.send(DispatcherCmd::GetStatus { reply: tx })?;
-    let (paired, _connected) = rx.recv_timeout(Duration::from_secs(5))??;
+    let (paired, connected) = rx.recv_timeout(Duration::from_secs(5))??;
     let mut c = cache().write().map_err(|e| anyhow!("{e}"))?;
     c.paired = paired;
+    c.connected = connected;
     Ok(())
 }
 
@@ -164,6 +167,15 @@ fn device_to_sink(d: BtDevice) -> AudioSink {
     AudioSink {
         address: format_mac(d.addr),
         name: d.name,
+    }
+}
+
+fn append_rx(acc: &mut Vec<u8>, data: &[u8]) {
+    acc.extend_from_slice(data);
+    if acc.len() > MAX_RX_ACCUM {
+        let drop = acc.len() - MAX_RX_ACCUM;
+        acc.drain(..drop);
+        log::warn!("uart rx acc truncated {drop} bytes");
     }
 }
 
@@ -189,6 +201,7 @@ fn dispatcher_loop(rx: Receiver<DispatcherCmd>, mut uart: UartDriver<'static>) {
                     }
                     Err(e) => {
                         log::error!("BT scan failed: {e:#}");
+                        acc.clear();
                         if let Ok(mut c) = cache().write() {
                             c.scanning = false;
                         }
@@ -199,43 +212,35 @@ fn dispatcher_loop(rx: Receiver<DispatcherCmd>, mut uart: UartDriver<'static>) {
                 let result =
                     do_connect(&mut uart, &mut seq, &mut acc, &mut read_buf, addr, name.clone());
                 let ok = result.is_ok();
-                let _ = reply.send(result);
+                if reply.send(result).is_err() {
+                    log::warn!("connect reply dropped");
+                }
                 if ok {
-                    let sink = AudioSink {
-                        address: format_mac(addr),
-                        name,
-                    };
-                    if let Ok(mut c) = cache().write() {
-                        c.paired = Some(sink);
+                    if let Err(e) = refresh_status_from_loop(&mut uart, &mut seq, &mut acc, &mut read_buf) {
+                        log::warn!("post-connect status refresh failed: {e:#}");
                     }
                 }
             }
             DispatcherCmd::Disconnect { reply } => {
-                let result = do_simple(&mut uart, &mut seq, &mut acc, &mut read_buf, Opcode::Disconnect, Request::Disconnect);
-                let _ = reply.send(result);
+                let result = do_disconnect(&mut uart, &mut seq, &mut acc, &mut read_buf);
+                if reply.send(result).is_err() {
+                    log::warn!("disconnect reply dropped");
+                }
+                if let Err(e) = refresh_status_from_loop(&mut uart, &mut seq, &mut acc, &mut read_buf) {
+                    log::warn!("post-disconnect status refresh failed: {e:#}");
+                }
             }
             DispatcherCmd::GetStatus { reply } => {
-                let result = match do_simple(
-                    &mut uart,
-                    &mut seq,
-                    &mut acc,
-                    &mut read_buf,
-                    Opcode::GetStatus,
-                    Request::GetStatus,
-                ) {
-                    Ok(()) => {
-                        match read_response(&mut uart, &mut acc, &mut read_buf, Opcode::GetStatus, seq.wrapping_sub(1)) {
-                            Ok(Response::Status { paired, connected }) => {
-                                Ok((paired.map(device_to_sink), connected))
-                            }
-                            Ok(Response::Error { code }) => Err(anyhow!("status error: {:?}", code)),
-                            Ok(_) => Err(anyhow!("unexpected status response")),
-                            Err(e) => Err(e),
-                        }
+                let result = do_get_status(&mut uart, &mut seq, &mut acc, &mut read_buf);
+                if let Ok((ref paired, connected)) = result {
+                    if let Ok(mut c) = cache().write() {
+                        c.paired = paired.clone();
+                        c.connected = connected;
                     }
-                    Err(e) => Err(e),
-                };
-                let _ = reply.send(result);
+                }
+                if reply.send(result).is_err() {
+                    log::warn!("get status reply dropped");
+                }
             }
             DispatcherCmd::PlaySound { play_id, sound_id } => {
                 let mut latest_id = play_id;
@@ -258,6 +263,19 @@ fn dispatcher_loop(rx: Receiver<DispatcherCmd>, mut uart: UartDriver<'static>) {
             }
         }
     }
+}
+
+fn refresh_status_from_loop(
+    uart: &mut UartDriver<'static>,
+    seq: &mut u8,
+    acc: &mut Vec<u8>,
+    read_buf: &mut [u8],
+) -> Result<()> {
+    let (paired, connected) = do_get_status(uart, seq, acc, read_buf)?;
+    let mut c = cache().write().map_err(|e| anyhow!("{e}"))?;
+    c.paired = paired;
+    c.connected = connected;
+    Ok(())
 }
 
 fn next_seq(seq: &mut u8) -> u8 {
@@ -284,15 +302,17 @@ fn read_response(
     read_buf: &mut [u8],
     opcode: Opcode,
     expect_seq: u8,
+    timeout: Duration,
 ) -> Result<Response> {
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + timeout;
     loop {
         if Instant::now() > deadline {
-            return Err(anyhow!("uart response timeout"));
+            acc.clear();
+            return Err(anyhow!("uart response timeout (opcode={opcode:?}, seq={expect_seq})"));
         }
         let n = UartDriver::read(uart, read_buf, 10).unwrap_or(0);
         if n > 0 {
-            acc.extend_from_slice(&read_buf[..n]);
+            append_rx(acc, &read_buf[..n]);
         }
         if let Ok((frames, consumed)) = decode_frames(acc) {
             if consumed > 0 {
@@ -325,10 +345,14 @@ fn do_scan(
             duration_secs: 10,
         },
     )?;
-    match read_response(uart, acc, read_buf, Opcode::Scan, s)? {
+    let timeout = Duration::from_secs(15);
+    match read_response(uart, acc, read_buf, Opcode::Scan, s, timeout)? {
         Response::ScanResult { devices } => Ok(devices),
         Response::Error { code } => Err(anyhow!("scan error: {:?}", code)),
-        _ => Err(anyhow!("unexpected scan response")),
+        other => {
+            acc.clear();
+            Err(anyhow!("unexpected scan response: {:?}", other))
+        }
     }
 }
 
@@ -347,27 +371,65 @@ fn do_connect(
         Opcode::Connect,
         &Request::Connect { addr, name },
     )?;
-    match read_response(uart, acc, read_buf, Opcode::Connect, s)? {
+    let timeout = Duration::from_secs(45);
+    match read_response(uart, acc, read_buf, Opcode::Connect, s, timeout)? {
         Response::Ok => Ok(()),
         Response::Error { code } => Err(anyhow!("connect: {:?}", code)),
-        other => Err(anyhow!("unexpected connect response: {:?}", other)),
+        other => {
+            log::warn!("unexpected connect response (seq={s}): {:?}", other);
+            acc.clear();
+            Err(anyhow!("unexpected connect response: {:?}", other))
+        }
     }
 }
 
-fn do_simple(
+fn do_disconnect(
     uart: &mut UartDriver<'static>,
     seq: &mut u8,
     acc: &mut Vec<u8>,
     read_buf: &mut [u8],
-    opcode: Opcode,
-    req: Request,
 ) -> Result<()> {
     let s = next_seq(seq);
-    write_request(uart, s, opcode, &req)?;
-    match read_response(uart, acc, read_buf, opcode, s)? {
-        Response::Ok | Response::Pong => Ok(()),
-        Response::Error { code } => Err(anyhow!("{:?}: {:?}", opcode as u8, code)),
-        _ => Err(anyhow!("unexpected response")),
+    write_request(uart, s, Opcode::Disconnect, &Request::Disconnect)?;
+    match read_response(
+        uart,
+        acc,
+        read_buf,
+        Opcode::Disconnect,
+        s,
+        Duration::from_secs(15),
+    )? {
+        Response::Ok => Ok(()),
+        Response::Error { code } => Err(anyhow!("disconnect: {:?}", code)),
+        other => {
+            acc.clear();
+            Err(anyhow!("unexpected disconnect response: {:?}", other))
+        }
+    }
+}
+
+fn do_get_status(
+    uart: &mut UartDriver<'static>,
+    seq: &mut u8,
+    acc: &mut Vec<u8>,
+    read_buf: &mut [u8],
+) -> Result<(Option<AudioSink>, bool)> {
+    let s = next_seq(seq);
+    write_request(uart, s, Opcode::GetStatus, &Request::GetStatus)?;
+    match read_response(
+        uart,
+        acc,
+        read_buf,
+        Opcode::GetStatus,
+        s,
+        Duration::from_secs(15),
+    )? {
+        Response::Status { paired, connected } => Ok((paired.map(device_to_sink), connected)),
+        Response::Error { code } => Err(anyhow!("status error: {:?}", code)),
+        other => {
+            acc.clear();
+            Err(anyhow!("unexpected status response: {:?}", other))
+        }
     }
 }
 
@@ -390,10 +452,20 @@ fn do_play_sound(
         Opcode::PlaySound,
         &Request::PlaySound { play_id, sound_id },
     )?;
-    match read_response(uart, acc, read_buf, Opcode::PlaySound, s)? {
+    match read_response(
+        uart,
+        acc,
+        read_buf,
+        Opcode::PlaySound,
+        s,
+        Duration::from_secs(15),
+    )? {
         Response::Ok => Ok(()),
         Response::Error { code } => Err(anyhow!("play sound: {:?}", code)),
-        _ => Err(anyhow!("unexpected play sound response")),
+        other => {
+            acc.clear();
+            Err(anyhow!("unexpected play sound response: {:?}", other))
+        }
     }
 }
 
@@ -403,7 +475,14 @@ pub fn ping_coprocessor(uart: &mut UartDriver<'static>) -> bool {
     let mut read_buf = [0u8; 256];
     write_request(uart, seq, Opcode::Ping, &Request::Ping).is_ok()
         && matches!(
-            read_response(uart, &mut acc, &mut read_buf, Opcode::Ping, seq),
+            read_response(
+                uart,
+                &mut acc,
+                &mut read_buf,
+                Opcode::Ping,
+                seq,
+                Duration::from_secs(5),
+            ),
             Ok(Response::Pong)
         )
 }

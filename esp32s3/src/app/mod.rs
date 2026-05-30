@@ -5,10 +5,15 @@ use serde::Serialize;
 
 use std::sync::mpsc;
 
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
+
 use crate::{
     app::client::{AppClient, APP_CLIENT},
     game::{GameConfig, GameState, MatchProgress},
-    hardware::wifi::{Wifi, WifiConfig},
+    hardware::{
+        wifi::{Wifi, WifiConfig, WifiNetwork},
+        wifi_storage,
+    },
 };
 
 type Reply<T> = mpsc::Sender<T>;
@@ -47,6 +52,26 @@ enum AppEvent {
     GetAppState {
         reply: Reply<AppState>,
     },
+    StartWifiScan {
+        reply: Reply<anyhow::Result<()>>,
+    },
+    GetWifiScan {
+        reply: Reply<WifiScanStatus>,
+    },
+}
+
+#[derive(Debug, Clone)]
+enum WifiScanState {
+    Idle,
+    Scanning,
+    Ready(Vec<WifiNetwork>),
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WifiScanStatus {
+    pub scanning: bool,
+    pub networks: Vec<WifiNetwork>,
 }
 
 pub struct App {
@@ -55,17 +80,21 @@ pub struct App {
     sender: mpsc::Sender<AppEvent>,
     receiver: mpsc::Receiver<AppEvent>,
     wifi: Wifi,
+    wifi_scan: WifiScanState,
+    nvs: EspDefaultNvsPartition,
 }
 
 impl App {
-    pub fn new(wifi: Wifi) -> Self {
+    pub fn new(wifi: Wifi, initial_state: AppState, nvs: EspDefaultNvsPartition) -> Self {
         let (sender, receiver) = mpsc::channel();
         Self {
-            state: AppState::Setup,
+            state: initial_state,
             sender,
             receiver,
             game: GameState::default(),
             wifi,
+            wifi_scan: WifiScanState::Idle,
+            nvs,
         }
     }
 
@@ -89,9 +118,11 @@ impl App {
 
             while let Ok(event) = self.receiver.try_recv() {
                 if let Err(err) = self.handle_event(&event) {
-                    log::error!("Failed to handle event {:?} {}", event, err);
+                    log::error!("Failed to handle event {:?}", err);
                 }
             }
+
+            self.poll_wifi_scan();
 
             FreeRtos::delay_ms(20);
         }
@@ -136,11 +167,23 @@ impl App {
                 reply.send(Ok(()))?;
             }
             AppEvent::AppConfigure { wifi_config, reply } => {
-                esp_idf_svc::hal::task::block_on(async {
-                    self.wifi.configure(&wifi_config).await.unwrap();
-                });
-                self.state = AppState::Running;
-                reply.send(Ok(()))?;
+                if let Err(e) = wifi_storage::save_wifi_config(&self.nvs, &wifi_config) {
+                    log::error!("NVS save before configure failed: {e:#}");
+                    reply.send(Err(e))?;
+                    return Ok(());
+                }
+                let result =
+                    esp_idf_svc::hal::task::block_on(self.wifi.configure(&wifi_config));
+                match result {
+                    Ok(()) => {
+                        self.state = AppState::Running;
+                        reply.send(Ok(()))?;
+                    }
+                    Err(e) => {
+                        log::error!("Wi-Fi configure failed: {e:#}");
+                        reply.send(Err(e))?;
+                    }
+                }
             }
             AppEvent::GetAppState { reply } => {
                 reply.send(self.state)?;
@@ -149,8 +192,71 @@ impl App {
                 let wifi_config = self.wifi.current_config();
                 reply.send(wifi_config.clone())?;
             }
+            AppEvent::StartWifiScan { reply } => {
+                if self.state != AppState::Setup {
+                    reply.send(Err(anyhow::anyhow!(
+                        "Wi-Fi scan só está disponível durante a configuração inicial"
+                    )))?;
+                    return Ok(());
+                }
+                if matches!(self.wifi_scan, WifiScanState::Scanning) {
+                    reply.send(Ok(()))?;
+                    return Ok(());
+                }
+                match self.wifi.begin_scan() {
+                    Ok(()) => {
+                        self.wifi_scan = WifiScanState::Scanning;
+                        reply.send(Ok(()))?;
+                    }
+                    Err(e) => {
+                        self.wifi_scan = WifiScanState::Failed(e.to_string());
+                        reply.send(Err(e))?;
+                    }
+                }
+            }
+            AppEvent::GetWifiScan { reply } => {
+                self.poll_wifi_scan();
+                reply.send(self.wifi_scan_status())?;
+            }
         }
         Ok(())
+    }
+
+    fn poll_wifi_scan(&mut self) {
+        if !matches!(self.wifi_scan, WifiScanState::Scanning) {
+            return;
+        }
+        match self.wifi.poll_scan_result() {
+            Ok(Some(networks)) => {
+                self.wifi_scan = WifiScanState::Ready(networks);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                log::error!("Wi-Fi scan poll failed: {e:#}");
+                self.wifi_scan = WifiScanState::Failed(e.to_string());
+            }
+        }
+    }
+
+    fn wifi_scan_status(&self) -> WifiScanStatus {
+        match &self.wifi_scan {
+            WifiScanState::Idle => WifiScanStatus {
+                scanning: false,
+                networks: vec![],
+            },
+            WifiScanState::Scanning => WifiScanStatus {
+                scanning: true,
+                networks: vec![],
+            },
+            WifiScanState::Ready(networks) => WifiScanStatus {
+                scanning: false,
+                networks: networks.clone(),
+            },
+            WifiScanState::Failed(_) => WifiScanStatus {
+                scanning: false,
+                networks: vec![],
+            },
+        }
     }
 
     fn init_client(&self) {

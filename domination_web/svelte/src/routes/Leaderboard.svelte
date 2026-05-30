@@ -31,6 +31,7 @@
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
   let polling = false;
+  let lastProgressErrorAt = 0;
 
   async function fetchGameData() {
     if (polling) return;
@@ -44,7 +45,11 @@
       progress = nextProgress;
       config = nextConfig;
     } catch {
-      toast.notify("Não foi possivel buscar progresso", "error");
+      const now = Date.now();
+      if (now - lastProgressErrorAt > 15_000) {
+        lastProgressErrorAt = now;
+        toast.notify("Não foi possivel buscar progresso", "error");
+      }
     } finally {
       polling = false;
     }

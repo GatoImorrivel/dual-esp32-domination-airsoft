@@ -1,8 +1,12 @@
 use std::time::Duration;
 
 use crate::{
-    app::App,
-    hardware::{input::InputButton, wifi::Wifi},
+    app::{App, AppState},
+    hardware::{
+        input::InputButton,
+        wifi::{Wifi, WifiConfig},
+        wifi_storage,
+    },
     http::{
         routes::{load_web, routes},
         server::HttpServer,
@@ -89,28 +93,64 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let mut wifi = Wifi::init(async_wifi);
+    let nvs_for_app = nvs.clone();
     let mut server = HttpServer::new();
     load_web(&mut server);
     routes(&mut server);
     core::mem::forget(server);
 
-    #[cfg(any(
-        esp_idf_comp_mdns_enabled,
-        esp_idf_comp_espressif__mdns_enabled
-    ))]
-    init_mdns()?;
-
     let red_btn = InputButton::new(peripherals.pins.gpio8, 50)?;
     let blue_btn = InputButton::new(peripherals.pins.gpio18, 50)?;
 
+    const BOOT_STA_TIMEOUT: Duration = Duration::from_secs(30);
+
     std::thread::Builder::new()
-        .stack_size(16 * 1024)
+        // client_mode + block_on needs headroom (16 KiB overflowed on configure).
+        .stack_size(48 * 1024)
         .spawn(move || {
-            esp_idf_svc::hal::task::block_on(async {
-                // wifi.ap_mode().await.unwrap();
-                wifi.client_mode("Ruptura-2G", "5himikug@_2G").await.unwrap();
+            let initial_state = esp_idf_svc::hal::task::block_on(async {
+                {
+                    let boot_state = match wifi_storage::load_wifi_config(&nvs) {
+                        Some(WifiConfig::ClientMode { ssid, password }) => {
+                            log::info!("Boot: trying saved STA ssid={ssid}");
+                            match wifi
+                                .client_mode_with_timeout(&ssid, &password, BOOT_STA_TIMEOUT)
+                                .await
+                            {
+                                Ok(()) => {
+                                    log::info!("Boot: STA connected");
+                                    AppState::Running
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "Boot: STA failed ({e:#}), entering setup AP"
+                                    );
+                                    wifi.setup_mode().await.expect("setup_mode");
+                                    AppState::Setup
+                                }
+                            }
+                        }
+                        Some(WifiConfig::APMode) => {
+                            log::info!("Boot: saved APMode, starting setup AP");
+                            wifi.setup_mode().await.expect("setup_mode");
+                            AppState::Setup
+                        }
+                        None => {
+                            log::info!("Boot: no saved Wi-Fi, starting setup AP");
+                            wifi.setup_mode().await.expect("setup_mode");
+                            AppState::Setup
+                        }
+                    };
+
+                    #[cfg(any(
+                        esp_idf_comp_mdns_enabled,
+                        esp_idf_comp_espressif__mdns_enabled
+                    ))]
+                    init_mdns().expect("mDNS init");
+                    boot_state
+                }
             });
-            let app = App::new(wifi);
+            let app = App::new(wifi, initial_state, nvs_for_app);
             app.run(move |app| {
                 if red_btn.is_pressed() && app.mut_game().button_press(game::Team::Red) {
                     audio::play_team(game::Team::Red);

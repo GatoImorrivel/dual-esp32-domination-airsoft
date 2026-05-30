@@ -38,6 +38,8 @@ pub struct BtSinksResponse {
     pub discovered: Vec<AudioSink>,
     #[serde(default)]
     pub scanning: bool,
+    #[serde(default)]
+    pub connected: bool,
 }
 
 #[cfg(not(test))]
@@ -53,7 +55,7 @@ pub fn check_coprocessor() -> anyhow::Result<()> {
 
 #[cfg(not(test))]
 pub fn list_sinks() -> anyhow::Result<BtSinksResponse> {
-    dispatcher::refresh_status().ok();
+    dispatcher::refresh_status()?;
     dispatcher::list_sinks_cached()
 }
 

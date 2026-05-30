@@ -7,7 +7,7 @@ use anyhow::Result;
 use domination_uart::{
     codec::{decode_frames, encode_frame, FrameDecodeError},
     protocol::{ErrorCode, Opcode, Request, Response},
-    BtDevice, MAX_CHUNK, MAX_DEVICES,
+    BtDevice, MAX_CHUNK, MAX_DEVICES, MAX_RX_ACCUM,
 };
 use esp_idf_svc::bt::BdAddr;
 use esp_idf_svc::hal::uart::UartDriver;
@@ -49,6 +49,11 @@ fn bridge_loop(bt: Arc<BluetoothAudio>, uart: &mut UartDriver<'static>) -> Resul
         let n = esp_idf_svc::hal::uart::UartDriver::read(uart, &mut rx_buf, 10).unwrap_or(0);
         if n > 0 {
             acc.extend_from_slice(&rx_buf[..n]);
+            if acc.len() > MAX_RX_ACCUM {
+                let drop = acc.len() - MAX_RX_ACCUM;
+                acc.drain(..drop);
+                log::warn!("uart rx acc truncated {drop} bytes");
+            }
         }
 
         loop {
@@ -71,9 +76,17 @@ fn bridge_loop(bt: Arc<BluetoothAudio>, uart: &mut UartDriver<'static>) -> Resul
                             frame.opcode,
                             &frame.payload,
                         );
-                        let payload = postcard::to_allocvec(&resp)?;
+                        let payload = match postcard::to_allocvec(&resp) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                log::error!("encode uart response: {e}");
+                                continue;
+                            }
+                        };
                         let out = encode_frame(frame.opcode, frame.seq, true, &payload);
-                        uart.write_all(&out)?;
+                        if let Err(e) = uart.write_all(&out) {
+                            log::error!("uart write response: {e}");
+                        }
                     }
                 }
                 Err(FrameDecodeError::NeedMoreBytes) => break,
@@ -180,12 +193,22 @@ fn handle_frame(
             let resp = match bt.a2dp_connect(&bd) {
                 Ok(()) => {
                     let device = BtDevice { name, addr };
-                    let _ = bt.set_paired_device(Some(device));
-                    Response::Ok
+                    match bt.set_paired_device(Some(device)) {
+                        Ok(()) => Response::Ok,
+                        Err(e) => {
+                            log::error!("save paired device to NVS: {e:#}");
+                            Response::Error {
+                                code: ErrorCode::Internal,
+                            }
+                        }
+                    }
                 }
-                Err(_) => Response::Error {
-                    code: ErrorCode::ConnectFailed,
-                },
+                Err(e) => {
+                    log::warn!("a2dp_connect failed: {e:#}");
+                    Response::Error {
+                        code: ErrorCode::ConnectFailed,
+                    }
+                }
             };
             *busy = false;
             resp
@@ -205,6 +228,11 @@ fn handle_frame(
         },
 
         (Opcode::PlaySound, Request::PlaySound { play_id, sound_id }) => {
+            if !bt.connection_state() {
+                return Response::Error {
+                    code: ErrorCode::NotConnected,
+                };
+            }
             if !audio::is_valid_sound(sound_id) {
                 return Response::Error {
                     code: ErrorCode::UnknownSound,

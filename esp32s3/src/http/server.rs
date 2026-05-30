@@ -78,6 +78,8 @@ pub struct HttpServer {
 
 impl HttpServer {
     pub fn new() -> Self {
+        // recv/send_wait_timeout stay at esp-idf defaults (5s) — not exposed on Configuration in 0.51.
+        // Wi-Fi scan keeps the radio up (setup Mixed) so the client TCP session survives the scan.
         let mut server = EspHttpServer::new(&esp_idf_svc::http::server::Configuration {
             stack_size: 32768,
             max_uri_handlers: 32,

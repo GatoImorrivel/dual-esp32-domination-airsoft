@@ -1,7 +1,7 @@
 use std::{sync::mpsc, sync::OnceLock, time::Duration};
 
 use crate::{
-    app::{AppEvent, AppState},
+    app::{AppEvent, AppState, WifiScanStatus},
     game::{GameConfig, MatchProgress},
     hardware::wifi::WifiConfig,
 };
@@ -58,7 +58,7 @@ impl AppClient {
     pub fn setup_wifi(&self, wifi_config: WifiConfig) -> anyhow::Result<()> {
         let (reply, rx) = mpsc::channel();
         self.tx.send(AppEvent::AppConfigure { wifi_config, reply })?;
-        let response = rx.recv_timeout(Duration::from_secs(5))??;
+        let response = rx.recv_timeout(Duration::from_secs(90))??;
 
         Ok(response)
     }
@@ -77,6 +77,18 @@ impl AppClient {
         let response = rx.recv_timeout(Duration::from_secs(5))?;
 
         Ok(response)
+    }
+
+    pub fn start_wifi_scan(&self) -> anyhow::Result<()> {
+        let (reply, rx) = mpsc::channel();
+        self.tx.send(AppEvent::StartWifiScan { reply })?;
+        Ok(rx.recv_timeout(Duration::from_secs(5))??)
+    }
+
+    pub fn get_wifi_scan(&self) -> anyhow::Result<WifiScanStatus> {
+        let (reply, rx) = mpsc::channel();
+        self.tx.send(AppEvent::GetWifiScan { reply })?;
+        Ok(rx.recv_timeout(Duration::from_secs(5))?)
     }
 
     pub fn get() -> AppClient {

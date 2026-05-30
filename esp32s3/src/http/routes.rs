@@ -3,7 +3,7 @@ use domination_web::{web_files, Dir};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::client::AppClient,
+    app::{client::AppClient, WifiScanStatus},
     bt,
     game::GameConfig,
     hardware::wifi::WifiConfig,
@@ -73,6 +73,20 @@ pub fn routes(server: &mut HttpServer) {
         let client = AppClient::get();
         let app_status = client.get_app_state()?;
         Ok(Json::new(&app_status)?.into())
+    });
+
+    server.post("/app/wifi/scan", |_: EmptyRequest, _, _| {
+        let client = AppClient::get();
+        client
+            .start_wifi_scan()
+            .map_err(|e| anyhow::anyhow!("Wi-Fi scan start failed: {e:#}"))?;
+        Ok(Json::new(&serde_json::json!({ "scanning": true }))?.into())
+    });
+
+    server.get("/app/wifi/scan", |_, _| {
+        let client = AppClient::get();
+        let status: WifiScanStatus = client.get_wifi_scan()?;
+        Ok(Json::new(&status)?.into())
     });
 
     #[derive(Debug, Clone, Deserialize)]

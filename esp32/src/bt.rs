@@ -80,7 +80,28 @@ impl BluetoothAudio {
         let paired = bt.load_paired_from_nvs();
         if let Some(ref device) = paired {
             *bt.paired.write().unwrap() = Some(device.clone());
-            log::info!("Restored paired device {:?}", device);
+            log::info!("Restored paired device {:?}, scheduling A2DP connect", device);
+            let bt_connect = bt.clone();
+            let addr = BdAddr::from_bytes(device.addr);
+            std::thread::Builder::new()
+                .name("bt_reconnect".into())
+                .stack_size(8 * 1024)
+                .spawn(move || {
+                    configure_app_pthread(b"bt_reconn\0", 8 * 1024);
+                    for attempt in 1..=3 {
+                        match bt_connect.a2dp_connect(&addr) {
+                            Ok(()) => {
+                                log::info!("A2DP connect initiated (attempt {attempt})");
+                                break;
+                            }
+                            Err(e) => {
+                                log::warn!("A2DP connect attempt {attempt} failed: {e:#}");
+                                FreeRtos::delay_ms(2000);
+                            }
+                        }
+                    }
+                })
+                .ok();
         }
 
         let a2dp_bt = bt.clone();
@@ -123,8 +144,11 @@ impl BluetoothAudio {
             A2dpEvent::ConnectionState {
                 bd_addr,
                 status,
-                disconnect_abnormal: _,
+                disconnect_abnormal,
             } => {
+                if disconnect_abnormal {
+                    log::warn!("A2DP abnormal disconnect from {bd_addr}");
+                }
                 match status {
                     ConnectionStatus::Connected => {
                         bt.connected.store(true, Ordering::SeqCst);
@@ -320,11 +344,17 @@ impl BluetoothAudio {
             _ => {}
         })?;
 
-        self.gap
-            .start_discovery(InqMode::General, duration, max_responses)?;
+        if let Err(e) = self
+            .gap
+            .start_discovery(InqMode::General, duration, max_responses)
+        {
+            let _ = self.gap.unsubscribe();
+            return Err(e.into());
+        }
         FreeRtos::delay_ms(duration as u32 * 1000);
-        self.gap.stop_discovery()?;
+        let stop_result = self.gap.stop_discovery();
         self.gap.unsubscribe()?;
+        stop_result?;
 
         let devices = Arc::try_unwrap(devices)
             .map_err(|_| anyhow::anyhow!("discovery callback still held"))?

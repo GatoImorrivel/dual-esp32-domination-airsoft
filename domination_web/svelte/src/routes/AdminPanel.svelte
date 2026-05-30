@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import AdminBluetooth from "../components/admin/AdminBluetooth.svelte";
   import AdminGame from "../components/admin/AdminGame.svelte";
   import BackButton from "../components/BackButton.svelte";
@@ -18,7 +18,8 @@
     type AudioSink,
     type BtSinksResponse,
   } from "../lib/bt";
-  import { authorizedPost, get } from "../lib/http";
+  import { UnauthorizedError, authorizedPost, get } from "../lib/http";
+  import { setSessionExpiredHandler } from "../lib/session";
   import { toast } from "../lib/toast";
 
   type Duration = { secs: number; nanos: number };
@@ -47,6 +48,37 @@
   let btActionAddress: string | null = null;
   let loadingState = false;
 
+  let pollIntervalId: ReturnType<typeof setInterval> | null = null;
+  let scanAbort = false;
+
+  function stopPolling() {
+    if (pollIntervalId) {
+      clearInterval(pollIntervalId);
+      pollIntervalId = null;
+    }
+  }
+
+  function startPollingForView(view: AdminView) {
+    stopPolling();
+    if (view === "game") {
+      void refreshProgress();
+      pollIntervalId = setInterval(refreshProgress, 2000);
+    } else if (view === "bluetooth") {
+      void loadBt(true);
+      pollIntervalId = setInterval(() => loadBt(true), 2500);
+    }
+  }
+
+  function handleSessionExpired() {
+    authenticated = false;
+    showLoginModal = true;
+    adminView = "hub";
+    stopPolling();
+    scanAbort = true;
+    btState = null;
+    toast.notify("Sessão expirada — faça login novamente", "error");
+  }
+
   async function loadState() {
     if (loadingState) return;
     loadingState = true;
@@ -55,33 +87,60 @@
       redSecs = config.red_time_to_win.secs;
       blueSecs = config.blue_time_to_win.secs;
       progress = await get("/game/progress");
-      await loadBt();
+      if (adminView === "bluetooth") {
+        await loadBt(true);
+      }
     } finally {
       loadingState = false;
     }
   }
 
-  async function loadBt() {
+  async function refreshProgress() {
     try {
-      btState = await listSinks();
+      progress = await get<{ is_active?: boolean }>("/game/progress");
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       console.error(e);
-      btState = null;
     }
   }
 
+  async function loadBt(silent = false) {
+    try {
+      btState = await listSinks();
+    } catch (e) {
+      if (e instanceof UnauthorizedError) return;
+      console.error(e);
+      if (!silent) {
+        toast.notify("Falha ao carregar Bluetooth", "error");
+      }
+    }
+  }
+
+  $: if (authenticated) {
+    startPollingForView(adminView);
+  }
+
   onMount(async () => {
+    setSessionExpiredHandler(handleSessionExpired);
+
     if (isLoggedIn()) {
       authenticated = true;
       try {
         await loadState();
       } catch (e) {
+        if (e instanceof UnauthorizedError) return;
         console.error(e);
         toast.notify("Falha ao carregar painel admin", "error");
       }
       return;
     }
     showLoginModal = true;
+  });
+
+  onDestroy(() => {
+    setSessionExpiredHandler(null);
+    stopPolling();
+    scanAbort = true;
   });
 
   async function submitLogin() {
@@ -95,6 +154,7 @@
       toast.notify("Autenticado", "info");
     } catch (e) {
       console.error(e);
+      if (e instanceof UnauthorizedError) return;
       toast.notify("Credenciais inválidas", "error");
     } finally {
       loggingIn = false;
@@ -109,28 +169,35 @@
     password = "";
     btState = null;
     adminView = "hub";
+    stopPolling();
+    scanAbort = true;
   }
 
   async function scanBluetooth() {
     btLoading = true;
+    scanAbort = false;
     try {
       btState = await scanSinks();
       if (btState.scanning) {
         toast.notify("Buscando dispositivos…", "info");
         const deadline = Date.now() + 20_000;
-        while (Date.now() < deadline) {
+        while (!scanAbort && Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 1500));
+          if (scanAbort || adminView !== "bluetooth") return;
           btState = await listSinks();
           if (!btState.scanning) {
             toast.notify("Busca concluída", "info");
             return;
           }
         }
-        toast.notify("Busca demorou demais", "error");
+        if (!scanAbort) {
+          toast.notify("Busca demorou demais", "error");
+        }
       } else {
         toast.notify("Busca concluída", "info");
       }
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       console.error(e);
       toast.notify("Falha ao buscar dispositivos", "error");
     } finally {
@@ -144,8 +211,13 @@
       btState = await pairSink(sink.address);
       toast.notify(`Emparelhado com ${sink.name ?? sink.address}`, "info");
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       console.error(e);
-      toast.notify("Falha ao emparelhar", "error");
+      const msg =
+        e instanceof Error && e.message.includes("scan in progress")
+          ? "Aguarde a busca terminar antes de emparelhar"
+          : "Falha ao emparelhar";
+      toast.notify(msg, "error");
     } finally {
       btActionAddress = null;
     }
@@ -157,6 +229,7 @@
       btState = await unpairSink();
       toast.notify("Desemparelhado", "info");
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       console.error(e);
       toast.notify("Falha ao desemparelhar", "error");
     } finally {
@@ -167,9 +240,10 @@
   async function startGame() {
     try {
       await authorizedPost("/game/start", {});
-      await loadState();
+      await refreshProgress();
       toast.notify("Partida iniciada", "info");
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       console.error(e);
       toast.notify("Falha ao iniciar partida", "error");
     }
@@ -178,9 +252,10 @@
   async function stopGame() {
     try {
       await authorizedPost("/game/stop", {});
-      await loadState();
+      await refreshProgress();
       toast.notify("Partida parada", "info");
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       console.error(e);
       toast.notify("Falha ao parar partida", "error");
     }
@@ -196,9 +271,14 @@
       await loadState();
       toast.notify("Configuração salva", "info");
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       console.error(e);
       toast.notify("Falha ao salvar configuração", "error");
     }
+  }
+
+  function openView(view: AdminView) {
+    adminView = view;
   }
 </script>
 
@@ -238,7 +318,13 @@
         {#if adminView === "hub"}
           <BackButton to="/leaderboard" />
         {:else}
-          <BackButton label="Voltar" onBack={() => (adminView = "hub")} />
+          <BackButton
+            label="Voltar"
+            onBack={() => {
+              scanAbort = true;
+              adminView = "hub";
+            }}
+          />
         {/if}
       </div>
       <h1>Administração</h1>
@@ -247,15 +333,14 @@
       </div>
     </header>
 
-    <!-- Mobile: hub + drill-down -->
     <div class="content" class:scroll-inner={adminView !== "hub"}>
       {#if adminView === "hub"}
         <div class="hub">
-          <UiCardButton on:click={() => (adminView = "bluetooth")}>
+          <UiCardButton on:click={() => openView("bluetooth")}>
             <span slot="title">Áudio Bluetooth</span>
             <span slot="desc">Emparelhar alto-falante e buscar dispositivos</span>
           </UiCardButton>
-          <UiCardButton on:click={() => (adminView = "game")}>
+          <UiCardButton on:click={() => openView("game")}>
             <span slot="title">Partida</span>
             <span slot="desc">Iniciar, parar e configurar tempos</span>
           </UiCardButton>

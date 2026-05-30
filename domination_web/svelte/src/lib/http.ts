@@ -1,12 +1,43 @@
-import { getValidToken } from "./auth";
+import { getValidToken, clearSession } from "./auth";
+import { notifySessionExpired } from "./session";
 
+/** mDNS hostname when the device is already on your LAN (STA mode). */
 export const BASE_URL = "http://sandi-dominacao.local";
+
+const MDNS_HOST = "sandi-dominacao";
+
+/** Prefer mDNS hostname; fall back to page origin (e.g. AP gateway IP) for debug. */
+export function resolveBaseUrl(override?: string): string {
+  if (override) {
+    return override;
+  }
+  if (typeof window !== "undefined") {
+    const { hostname, origin } = window.location;
+    if (hostname.includes(MDNS_HOST)) {
+      return BASE_URL;
+    }
+    if (origin.startsWith("http://") || origin.startsWith("https://")) {
+      return origin;
+    }
+  }
+  return BASE_URL;
+}
 
 export class UnauthorizedError extends Error {
   constructor(message = "Não autorizado") {
     super(message);
     this.name = "UnauthorizedError";
   }
+}
+
+function throwUnauthorized(): never {
+  throw new UnauthorizedError();
+}
+
+function handleAuthorizedUnauthorized(): never {
+  clearSession();
+  notifySessionExpired();
+  throwUnauthorized();
 }
 
 function buildUrl(route: string, baseUrl: string): string {
@@ -22,17 +53,34 @@ function jsonHeaders(extra?: Record<string, string>): Record<string, string> {
   };
 }
 
+/** POST without waiting for response (STA Wi-Fi configure while link drops). */
+export function postFireAndForget(
+  route: string,
+  body?: unknown,
+  headers?: Record<string, string>,
+  baseUrl?: string
+): void {
+  const resolvedBase = resolveBaseUrl(baseUrl);
+  void fetch(buildUrl(route, resolvedBase), {
+    body: JSON.stringify(body ?? {}),
+    headers: jsonHeaders(headers),
+    method: "POST",
+    keepalive: true,
+  }).catch(() => {});
+}
+
 export async function post<R>(
   route: string,
   body?: unknown,
   headers?: Record<string, string>,
-  baseUrl = BASE_URL
+  baseUrl?: string
 ): Promise<R> {
-  if (baseUrl === BASE_URL && body === undefined) {
+  const resolvedBase = resolveBaseUrl(baseUrl);
+  if (body === undefined) {
     body = {};
   }
 
-  const request = await fetch(buildUrl(route, baseUrl), {
+  const request = await fetch(buildUrl(route, resolvedBase), {
     body: JSON.stringify(body),
     headers: jsonHeaders(headers),
     method: "POST",
@@ -41,7 +89,7 @@ export async function post<R>(
   const response = await request.text();
 
   if (request.status === 401 || request.status === 403) {
-    throw new UnauthorizedError();
+    throwUnauthorized();
   }
 
   if (!request.ok) {
@@ -63,15 +111,15 @@ export async function post<R>(
 export async function get<R>(
   route: string,
   headers?: Record<string, string>,
-  baseUrl = BASE_URL
+  baseUrl?: string
 ): Promise<R> {
-  const request = await fetch(buildUrl(route, baseUrl), {
+  const request = await fetch(buildUrl(route, resolveBaseUrl(baseUrl)), {
     headers,
     method: "GET",
   });
 
   if (request.status === 401 || request.status === 403) {
-    throw new UnauthorizedError();
+    throwUnauthorized();
   }
 
   if (!request.ok) {
@@ -90,16 +138,30 @@ async function authHeaders(): Promise<Record<string, string>> {
 export async function authorizedPost<R>(
   route: string,
   body?: unknown,
-  baseUrl = BASE_URL
+  baseUrl?: string
 ): Promise<R> {
-  const headers = await authHeaders();
-  return post<R>(route, body, headers, baseUrl);
+  try {
+    const headers = await authHeaders();
+    return await post<R>(route, body, headers, baseUrl);
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      handleAuthorizedUnauthorized();
+    }
+    throw e;
+  }
 }
 
 export async function authorizedGet<R>(
   route: string,
-  baseUrl = BASE_URL
+  baseUrl?: string
 ): Promise<R> {
-  const headers = await authHeaders();
-  return get<R>(route, headers, baseUrl);
+  try {
+    const headers = await authHeaders();
+    return await get<R>(route, headers, baseUrl);
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      handleAuthorizedUnauthorized();
+    }
+    throw e;
+  }
 }

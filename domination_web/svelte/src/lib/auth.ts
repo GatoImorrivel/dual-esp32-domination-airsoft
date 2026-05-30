@@ -80,7 +80,7 @@ export async function loginAndStore(
   username: string,
   password: string
 ): Promise<void> {
-  saveCreds({ username, password });
   const { token } = await login(username, password);
+  saveCreds({ username, password });
   saveTokenRaw(token);
 }

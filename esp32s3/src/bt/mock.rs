@@ -6,6 +6,7 @@ struct MockBtState {
     paired: Option<AudioSink>,
     discovered: Vec<AudioSink>,
     scanning: bool,
+    connected: bool,
 }
 
 static MOCK_BT: OnceLock<RwLock<MockBtState>> = OnceLock::new();
@@ -16,6 +17,7 @@ fn state() -> &'static RwLock<MockBtState> {
             paired: None,
             discovered: vec![],
             scanning: false,
+            connected: false,
         })
     })
 }
@@ -25,6 +27,7 @@ pub fn reset() {
     guard.paired = None;
     guard.discovered.clear();
     guard.scanning = false;
+    guard.connected = false;
 }
 
 fn mock_discovered_devices() -> Vec<AudioSink> {
@@ -54,6 +57,7 @@ pub fn list_sinks() -> anyhow::Result<BtSinksResponse> {
         paired: guard.paired.clone(),
         discovered: guard.discovered.clone(),
         scanning: guard.scanning,
+        connected: guard.connected,
     })
 }
 
@@ -65,6 +69,7 @@ pub fn scan_sinks() -> anyhow::Result<BtSinksResponse> {
         paired: guard.paired.clone(),
         discovered: guard.discovered.clone(),
         scanning: false,
+        connected: guard.connected,
     })
 }
 
@@ -80,20 +85,24 @@ pub fn pair_sink(address: &str) -> anyhow::Result<BtSinksResponse> {
             name: None,
         });
     guard.paired = Some(sink);
+    guard.connected = true;
     Ok(BtSinksResponse {
         paired: guard.paired.clone(),
         discovered: guard.discovered.clone(),
         scanning: guard.scanning,
+        connected: guard.connected,
     })
 }
 
 pub fn unpair_sink() -> anyhow::Result<BtSinksResponse> {
     let mut guard = state().write().map_err(|e| anyhow::anyhow!("{e}"))?;
     guard.paired = None;
+    guard.connected = false;
     Ok(BtSinksResponse {
         paired: None,
         discovered: guard.discovered.clone(),
         scanning: guard.scanning,
+        connected: false,
     })
 }
 
