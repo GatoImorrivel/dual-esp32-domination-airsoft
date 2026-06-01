@@ -92,16 +92,17 @@ impl GameState {
         true
     }
 
-    /// Call this periodically (e.g. every 50–100 ms)
-    pub fn tick(&mut self) {
+    /// Call this periodically (e.g. every 50–100 ms). Returns the winning team when the
+    /// match ends by accumulated time on this tick.
+    pub fn tick(&mut self) -> Option<Team> {
         if !self.active {
-            return;
+            return None;
         }
 
         let now = Instant::now();
         let Some(last) = self.last_tick else {
             self.last_tick = Some(now);
-            return;
+            return None;
         };
 
         let delta = now.duration_since(last);
@@ -115,13 +116,16 @@ impl GameState {
 
         self.last_tick = Some(now);
 
-        if let Some(winner) = self.winner() {
-            match winner {
-                Team::Red => log::info!("Red team won"),
-                Team::Blue => log::info!("Blue team won"),
-            }
-            self.stop();
+        let Some(winner) = self.winner() else {
+            return None;
+        };
+
+        match winner {
+            Team::Red => log::info!("Red team won"),
+            Team::Blue => log::info!("Blue team won"),
         }
+        self.stop();
+        Some(winner)
     }
 
     /// Check if someone won

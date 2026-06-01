@@ -9,6 +9,7 @@ use esp_idf_svc::nvs::EspDefaultNvsPartition;
 
 use crate::{
     app::client::{AppClient, APP_CLIENT},
+    audio,
     game::{GameConfig, GameState, MatchProgress},
     hardware::{
         wifi::{Wifi, WifiConfig, WifiNetwork},
@@ -113,7 +114,9 @@ impl App {
             }
 
             if self.game.active() {
-                self.game.tick();
+                if let Some(winner) = self.game.tick() {
+                    audio::play_winner(winner);
+                }
             }
 
             while let Ok(event) = self.receiver.try_recv() {

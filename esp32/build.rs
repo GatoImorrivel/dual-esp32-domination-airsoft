@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const MAX_AUDIO_BYTES: u64 = 384 * 1024;
+/// Longest embedded clip (~2.6 s stereo 44.1 kHz) is ~449 KiB PCM.
+const MAX_AUDIO_BYTES: u64 = 512 * 1024;
 
 fn main() {
     let defaults = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("sdkconfig.defaults");
@@ -23,8 +24,10 @@ fn convert_team_audio() {
     println!("cargo:rerun-if-changed={}", audios_dir.display());
 
     let assets = [
-        ("zona-vermelha-dominada.mp3", "red.pcm", "RED_PCM"),
-        ("zona-azul-dominada.mp3", "blue.pcm", "BLUE_PCM"),
+        ("vermelho-dominou.mp3", "red.pcm", "RED_PCM"),
+        ("azul-dominou.mp3", "blue.pcm", "BLUE_PCM"),
+        ("vencedor-vermelho.mp3", "red_win.pcm", "RED_WIN_PCM"),
+        ("vencedor-azul.mp3", "blue_win.pcm", "BLUE_WIN_PCM"),
     ];
 
     for (mp3_name, pcm_name, env_key) in assets {

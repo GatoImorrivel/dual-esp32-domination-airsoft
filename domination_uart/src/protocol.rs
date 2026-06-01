@@ -9,7 +9,8 @@ pub enum Opcode {
     Disconnect = 3,
     GetStatus = 4,
     PlayCancel = 5,
-    /// Play embedded coprocessor clip by id (see [`crate::SOUND_RED`] / [`crate::SOUND_BLUE`]).
+    /// Play embedded coprocessor clip by id (see [`crate::SOUND_RED`], [`crate::SOUND_BLUE`],
+    /// [`crate::SOUND_RED_WIN`], [`crate::SOUND_BLUE_WIN`]).
     PlaySound = 6,
 }
 

@@ -28,6 +28,8 @@ pub const MAX_DEVICES: usize = 32;
 /// Embedded team cue ids on the ESP32 coprocessor (`esp32/audios/`).
 pub const SOUND_RED: u8 = 0;
 pub const SOUND_BLUE: u8 = 1;
+pub const SOUND_RED_WIN: u8 = 2;
+pub const SOUND_BLUE_WIN: u8 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BtDevice {
